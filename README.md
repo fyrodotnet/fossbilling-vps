@@ -8,6 +8,12 @@ This is a module for FOSSBilling that adds VPS hosting support with Proxmox.
 - Admin section to populate credentials, can use any realm/secret/token, etc. Allows you to specify cost per virtual machine, with two tiers of storage (presumably "slow" and "fast"), CPU, and memory by the hour. The Admin page also provides a billing breakdown.
 - Keeps track of the number of hours that each machine is powered on, and bills the user monthly based on that.
 
+## Requirements
+
+- Proxmox 9
+- Latest FOSSBilling 0.8.3
+- Composer
+
 ## Information
 
 The module works based on funds added to the account (via whatever your chosen FOSSBilling payment gateway module), and it requires the user to have sufficient funds for one month of continuous usage for the VM they are provisioning. This is made very clear, and it will not allow you to provision a VM with insufficient funds, although this requirement can of course be removed. Most of the default values (e.g. the calculator) are from its use at https://rc7.net
