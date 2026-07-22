@@ -1,0 +1,15 @@
+{
+  "name": "rc7/fossbilling-vps-module-api",
+  "description": "Composer dependencies for the FOSSBilling VPS module API layer",
+  "type": "library",
+  "license": "Apache-2.0",
+  "minimum-stability": "stable",
+  "require": {
+    "php": "^8.0",
+    "guzzlehttp/guzzle": "^7.0",
+    "zzantares/proxmoxve": "^1.0"
+  },
+  "config": {
+    "sort-packages": true
+  }
+}

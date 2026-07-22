@@ -1,0 +1,205 @@
+{% extends request.ajax ? "layout_blank.html.twig" : "layout_default.html.twig" %}
+
+{% block meta_title %}{{ 'VPS'|trans }}{% endblock %}
+
+{% set loader_nr = request.loader | default("8")%}
+{% set loader_url = ('img/assets/loaders/loader'~loader_nr~'.gif') %}
+
+{% block body_class %}vps{% endblock %}
+{% set vm = client.vps_get_vmid_from_url() %}
+
+{% block breadcrumb %}
+  <li class="breadcrumb-item"><a href="{{ 'vps'|url }}">{{ 'VPS'|trans }}</a></li>
+	<li class="active breadcrumb-item" aria-current="page">{{ 'Manage'|trans }}</li>
+{% endblock %}
+{% block content_before %}{% endblock %}
+
+{% block page_header %}
+<article class="page-header">
+  <h1>{{ 'Control VPS'|trans }}</h1>
+</article>
+{% endblock %}
+
+{% block content %}
+
+{% if show_protected %}
+	{% if vm in client.vps_proxmox_vms_by_user(profile.id) %}
+
+		<div class="row">
+			<article class="span12 data-block">
+				<div class="data-container">
+					<header>
+						{% set getNameArray = [vm, 'name'] %}
+						{% set vmName = client.vps_proxmox_status_by_id(getNameArray) %}
+						{% set getStatusArray = [vm, 'status'] %}
+						{% set vmStatus = client.vps_proxmox_status_by_id(getStatusArray)|default('unknown') %}
+						<h1>{{ 'Control VPS'|trans }} - {{ vmName ?: ('VM #' ~ vm) }}</h1>
+					</header>
+					<section>
+						<div class="mb-2">
+							<a class="btn btn-outline-secondary btn-sm" href="{{ 'vps'|url }}">{{ 'Back to VPS list'|trans }}</a>
+						</div>
+						<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+							<button class="btn btn-outline-info btn-sm" type="button" id="novncReconnectBtn">{{ 'Reconnect Console'|trans }}</button>
+							{% if vmStatus != 'running' %}
+								<button class="btn btn-primary btn-sm vm-toolbar-action" data-action="start" data-vmid="{{ vm }}">{{ 'Power on'|trans }}</button>
+							{% endif %}
+							{% if vmStatus == 'running' %}
+								<button class="btn btn-info btn-sm vm-toolbar-action" data-action="reboot" data-vmid="{{ vm }}">{{ 'Reboot'|trans }}</button>
+								<button class="btn btn-secondary btn-sm vm-toolbar-action" data-action="stop" data-vmid="{{ vm }}">{{ 'Power off'|trans }}</button>
+							{% endif %}
+							<button class="btn btn-outline-primary btn-sm vm-toolbar-action" data-action="access" data-vmid="{{ vm }}">{{ 'Access details'|trans }}</button>
+							<button class="btn btn-outline-warning btn-sm vm-toolbar-action" data-action="reset-password" data-vmid="{{ vm }}">{{ 'Reset root password'|trans }}</button>
+							<span class="badge bg-secondary text-white">{{ 'Status'|trans }}: {{ vmStatus|upper }}</span>
+						</div>
+						<div id="consoleActionResult" class="d-none mb-3"></div>
+					</section>
+				</div>
+			</article>
+		</div>
+
+  	{% set vmNode = client.vps_proxmox_vm_node_by_id(vm) %}
+		{% set vncArray = client.vps_proxmox_vnc(vm) %}
+
+    {% set vncUrl = "https://" ~ vmNode ~ ".domain.com:8006/?console=kvm&novnc=1&node=" ~ vmNode ~ "&resize=1&vmid=" ~ vm ~ "&path=api2/json/nodes/" ~ vmNode ~ "/qemu/" ~ vm ~ "/vncwebsocket/port/" ~ vncArray.port ~ "/vncticket/" ~ vncArray.vncticket %}
+		<div class="row" style="height:500px;">
+    	<iframe id="novncConsoleFrame" src="{{vncUrl}}" frameborder="0" scrolling="no" width="100%" height="100%"></iframe>
+		</div>
+
+		<div class="modal fade" id="consoleAccessModal" tabindex="-1" aria-labelledby="consoleAccessModalLabel" aria-hidden="true">
+			<div class="modal-dialog">
+				<div class="modal-content">
+					<div class="modal-header">
+						<h5 class="modal-title" id="consoleAccessModalLabel">{{ 'VM Access Details'|trans }}</h5>
+						<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+					</div>
+					<div class="modal-body" id="consoleAccessModalBody">
+						<div class="d-flex align-items-center gap-2">
+							<div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div>
+							<span>{{ 'Loading access details...'|trans }}</span>
+						</div>
+					</div>
+					<div class="modal-footer">
+						<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ 'Close'|trans }}</button>
+					</div>
+				</div>
+			</div>
+		</div>
+	{% else %}
+		<div class="row">
+			<article class="span12 data-block">
+				<div class="data-container">
+					<header>
+						<h4>Access denied</h4>
+					</header>
+					<section>
+						<p>You do not have access to this resource. If this VM belongs to you, please open a support ticket and we will add it to your account.</p>
+					</section>
+				</div>
+			</article>
+		</div>
+	{% endif %}
+
+<script type="text/javascript">
+document.addEventListener('DOMContentLoaded', function() {
+	const resultBox = document.getElementById('consoleActionResult');
+    const novncFrame = document.getElementById('novncConsoleFrame');
+    const novncReconnectButton = document.getElementById('novncReconnectBtn');
+
+	function showResult(message, type) {
+		if (!resultBox) {
+			return;
+		}
+		resultBox.classList.remove('d-none', 'alert-success', 'alert-danger', 'alert-info');
+		resultBox.classList.add('alert', type === 'error' ? 'alert-danger' : (type === 'info' ? 'alert-info' : 'alert-success'));
+		resultBox.textContent = message;
+	}
+
+	function runVmAction(endpoint, vmid, successMessage) {
+		FOSSBilling.api.client.post(endpoint, { vmid: vmid },
+			function() {
+				showResult(successMessage, 'success');
+				window.setTimeout(function() { window.location.reload(); }, 700);
+			},
+			function(res) {
+				showResult((res.message || 'Request failed') + (res.code ? ' (' + res.code + ')' : ''), 'error');
+			}
+		);
+	}
+
+    if (novncReconnectButton && novncFrame) {
+        novncReconnectButton.addEventListener('click', function() {
+            showResult('{{ 'Reconnecting console...'|trans }}', 'info');
+            try {
+                const frameUrl = new URL(novncFrame.src, window.location.href);
+                frameUrl.searchParams.set('_reconnect_ts', String(Date.now()));
+                novncFrame.src = frameUrl.toString();
+            } catch (e) {
+                novncFrame.src = novncFrame.src;
+            }
+        });
+    }
+
+	function showAccessDetails(vmid) {
+		const body = document.getElementById('consoleAccessModalBody');
+		if (!body) {
+			return;
+		}
+		body.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Loading access details...'|trans }}</span></div>';
+
+		FOSSBilling.api.client.post('vps/vm_access_details', { vmid: vmid },
+			function(result) {
+				let html = '<p class="mb-2"><strong>' + (result.name || ('VM #' + vmid)) + '</strong></p>';
+				html += '<p class="mb-2"><strong>{{ 'IP address'|trans }}:</strong> <code>' + (result.ip_address || '-') + '</code></p>';
+				if (result.root_password) {
+					html += '<p class="mb-2"><strong>{{ 'Root password'|trans }}:</strong> <code>' + result.root_password + '</code></p>';
+				} else {
+					html += '<p class="mb-0 text-secondary">{{ 'Root password is not available for this VM.'|trans }}</p>';
+				}
+				body.innerHTML = html;
+				new bootstrap.Modal(document.getElementById('consoleAccessModal')).show();
+			},
+			function(res) {
+				showResult((res.message || 'Failed to load access details') + (res.code ? ' (' + res.code + ')' : ''), 'error');
+			}
+		);
+	}
+
+	document.querySelectorAll('.vm-toolbar-action').forEach(function(button) {
+		button.addEventListener('click', function() {
+			const vmid = parseInt(button.dataset.vmid || '0', 10);
+			const action = button.dataset.action || '';
+			if (!vmid) {
+				return;
+			}
+
+			if (action === 'start') {
+				runVmAction('vps/vm_start', vmid, '{{ 'VM powered on'|trans }}');
+			} else if (action === 'stop') {
+				runVmAction('vps/vm_stop', vmid, '{{ 'VM powered off'|trans }}');
+			} else if (action === 'reboot') {
+				if (!confirm('{{ 'Are you sure you want to reboot this VM?'|trans }}')) {
+					return;
+				}
+				runVmAction('vps/vm_reboot', vmid, '{{ 'VM rebooted'|trans }}');
+			} else if (action === 'access') {
+				showAccessDetails(vmid);
+			} else if (action === 'reset-password') {
+				if (!confirm('{{ 'Reset root password now? This may reboot the VM.'|trans }}')) {
+					return;
+				}
+				FOSSBilling.api.client.post('vps/vm_reset_root_password', { vmid: vmid },
+					function(result) {
+						showResult('{{ 'Root password reset complete'|trans }}: ' + (result.root_password || ''), 'success');
+					},
+					function(res) {
+						showResult((res.message || 'Password reset failed') + (res.code ? ' (' + res.code + ')' : ''), 'error');
+					}
+				);
+			}
+		});
+	});
+});
+</script>
+{% endif %}
+{% endblock %}

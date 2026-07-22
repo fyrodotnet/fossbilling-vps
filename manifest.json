@@ -1,0 +1,12 @@
+{
+  "id": "vps",
+  "type": "mod",
+  "name": "VPS",
+  "description": "FOSSBilling module for provisioning a VPS",
+  "icon_url": "icon.svg",
+  "homepage_url": "https://rc7.net",
+  "author": "RC7 LLC",
+  "author_url": "https://rc7.net",
+  "license": "Apache 2.0 - https://www.apache.org/licenses/LICENSE-2.0",
+  "version": "0.0.1"
+}
