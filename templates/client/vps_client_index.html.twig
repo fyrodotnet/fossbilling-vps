@@ -1,0 +1,2021 @@
+{% extends request.ajax ? "layout_blank.html.twig" : "layout_default.html.twig" %}
+
+{% block meta_title %}{{ 'VPS'|trans }}{% endblock %}
+
+{% set isContainersPage = containers_page|default(false) %}
+{% set active_menu = isContainersPage ? 'containers' : 'vps' %}
+{% set loader_nr = request.loader | default("8")%}
+{% set loader_url = ('img/assets/loaders/loader'~loader_nr~'.gif') %}
+
+{% block body_class %}vps{% endblock %}
+{% block breadcrumb %}
+    <li class="active breadcrumb-item" aria-current="page">{{ isContainersPage ? ('Containers'|trans) : ('VPS'|trans) }}</li>
+{% endblock %}
+{% block content_before %}{% endblock %}
+
+{% block page_header %}
+<article class="page-header">
+    <h1>{{ isContainersPage ? ('Containers'|trans) : ('Provision VPS'|trans) }}</h1>
+</article>
+{% endblock%}
+
+{% block content %}
+{% set showContainerUi = isContainersPage %}
+<div class="row">
+    <article class="span12 data-block">
+        <div class="data-container">
+            <header>
+                <h1>{{ isContainersPage ? ('Containers'|trans) : ('Provision VPS'|trans) }}</h1>
+                <h2>{{ isContainersPage ? ('Provision and manage containers'|trans) : ('Create and manage virtual servers'|trans) }}</h2>
+            </header>
+        </div>
+    </article>
+</div>
+
+{% if show_protected %}
+{% set currentBalance = client.client_balance_get_total|default(0) %}
+{% set hasActiveSubscription = client.vps_has_active_subscription() %}
+{% set billingBypassEnabled = client.vps_billing_bypass_enabled() %}
+<div class="row">
+    <article class="span12 data-block">
+        <div class="data-container">
+            <header>
+                <h4>
+                    {% if isContainersPage %}
+                        {{ 'Containers belonging to'|trans }} {{ profile.email }}
+                    {% else %}
+                        {{ 'Virtual machines belonging to'|trans }} {{ profile.email }}
+                    {% endif %}
+                </h4>
+            </header>
+            <section>
+                <div class="d-flex gap-2 mb-2">
+                    <input type="text" class="form-control" id="newVmFolderName" placeholder="{{ 'New folder name'|trans }}" maxlength="64">
+                    <button type="button" class="btn btn-outline-primary btn-sm" id="createVmFolderBtn">{{ 'Create folder'|trans }}</button>
+                    <select class="form-select form-select-sm" id="deleteVmFolderSelect" style="max-width: 220px;">
+                        <option value="">{{ 'Select folder to delete'|trans }}</option>
+                    </select>
+                    <button type="button" class="btn btn-outline-danger btn-sm" id="deleteVmFolderBtn">{{ 'Delete folder'|trans }}</button>
+                </div>
+                <style>
+                    .vps-grid-row {
+                        display: grid;
+                        grid-template-columns: minmax(140px, 1.6fr) minmax(90px, 1fr) minmax(70px, 0.7fr) minmax(100px, 1fr) minmax(140px, 1.4fr) minmax(130px, 1.2fr) minmax(380px, 2.6fr);
+                        gap: 0.5rem;
+                        align-items: center;
+                    }
+                    .vps-grid-row.vps-grid-head {
+                        font-weight: 600;
+                    }
+                    .vps-grid-cell {
+                        min-width: 0;
+                    }
+                    .vm-snapshot-row {
+                        display: grid;
+                        grid-template-columns: 1fr;
+                        padding: 0.25rem 0 0.75rem;
+                    }
+                    .vm-snapshot-box {
+                        border: 1px solid rgba(127, 127, 127, 0.3);
+                        border-radius: 0.5rem;
+                        padding: 0.5rem 0.75rem;
+                        background: rgba(127, 127, 127, 0.08);
+                    }
+                    .vm-snapshot-item {
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        gap: 0.5rem;
+                        padding: 0.25rem 0;
+                    }
+                </style>
+                {% if not isContainersPage %}
+                <div class="vps-grid-row vps-grid-head mb-2">
+                    <div class="vps-grid-cell">VM</div>
+                    <div class="vps-grid-cell">{{ 'Uptime'|trans }}</div>
+                    <div class="vps-grid-cell">vCPU</div>
+                    <div class="vps-grid-cell">{{ 'Memory'|trans }}</div>
+                    <div class="vps-grid-cell">{{ 'Disk'|trans }}</div>
+                    <div class="vps-grid-cell">{{ 'IP Address'|trans }}</div>
+                    <div class="vps-grid-cell">{{ 'Action'|trans }}</div>
+                </div>
+{% set vmRows = client.vps_vms_overview() %}
+<div id="vpsVmRowsContainer">
+{% for vm in vmRows %}
+    <div class="vps-grid-row mb-2 vm-row" data-vmid="{{ vm.vmid }}">
+        <div class="vps-grid-cell">
+            <a href="{{ ('vps/manage/vm/' ~ vm.vmid)|url }}">{{ vm.name|default('VM #' ~ vm.vmid) }}</a>
+        </div>
+        <div class="vps-grid-cell">
+            <small>
+                {% if vm.uptime_hours is not null %}
+                    {{ vm.uptime_hours }} {{ 'hours'|trans }}
+                {% else %}
+                    -
+                {% endif %}
+            </small>
+        </div>
+        <div class="vps-grid-cell">{{ vm.vcpu is not null ? vm.vcpu : '-' }}</div>
+        <div class="vps-grid-cell">{{ vm.memory_mb is not null ? (vm.memory_mb ~ 'MB') : '-' }}</div>
+        <div class="vps-grid-cell">
+            {% if vm.disk_size > 0 %}
+                {{ vm.disk_size }} GB{% if vm.disk_type %} ({{ vm.disk_type|upper }}){% endif %}
+            {% else %}
+                -
+            {% endif %}
+        </div>
+        <div class="vps-grid-cell"><small>{{ vm.ip_address ?: '-' }}</small></div>
+        <div class="vps-grid-cell">
+            {% set vmStatus = vm.status|default('unknown') %}
+            <div class="d-flex flex-nowrap gap-1">
+                {% if vmStatus != "running" %}
+                    <button class="btn btn-primary btn-sm vm-action-btn" title="{{ 'Power on'|trans }}" aria-label="{{ 'Power on'|trans }}" data-action="start" data-vmid="{{ vm.vmid }}" data-bs-toggle="modal" data-bs-target="#powerOnModal">▶</button>
+                {% endif %}
+                {% if vmStatus == "running" %}
+                    <button class="btn btn-primary btn-sm vm-action-btn" title="{{ 'Reboot'|trans }}" aria-label="{{ 'Reboot'|trans }}" data-action="reboot" data-vmid="{{ vm.vmid }}" data-bs-toggle="modal" data-bs-target="#rebootVmModal">↻</button>
+                    <button class="btn btn-secondary btn-sm vm-action-btn" title="{{ 'Power off'|trans }}" aria-label="{{ 'Power off'|trans }}" data-action="stop" data-vmid="{{ vm.vmid }}" data-bs-toggle="modal" data-bs-target="#powerOffModal">⏹</button>
+                {% endif %}
+                <button class="btn btn-info btn-sm vm-action-btn" title="{{ 'Duplicate'|trans }}" aria-label="{{ 'Duplicate'|trans }}" data-action="duplicate" data-vmid="{{ vm.vmid }}" data-vmname="{{ vm.name|default('VM #' ~ vm.vmid)|e('html_attr') }}" data-bs-toggle="modal" data-bs-target="#duplicateVmModal">⧉</button>
+                <button class="btn btn-outline-primary btn-sm vm-action-btn" title="{{ 'Access details'|trans }}" aria-label="{{ 'Access details'|trans }}" data-action="access" data-vmid="{{ vm.vmid }}" data-vmname="{{ vm.name|default('VM #' ~ vm.vmid)|e('html_attr') }}" data-bs-toggle="modal" data-bs-target="#vmAccessModal">🔐</button>
+                <button class="btn btn-outline-warning btn-sm vm-action-btn" title="{{ 'Reset root password'|trans }}" aria-label="{{ 'Reset root password'|trans }}" data-action="reset-password" data-vmid="{{ vm.vmid }}">🔑</button>
+                <button class="btn btn-outline-secondary btn-sm vm-action-btn" title="{{ 'Take snapshot'|trans }}" aria-label="{{ 'Take snapshot'|trans }}" data-action="take-snapshot" data-vmid="{{ vm.vmid }}" data-vmname="{{ vm.name|default('VM #' ~ vm.vmid)|e('html_attr') }}">📸</button>
+                <a class="btn btn-dark btn-sm" title="{{ 'View console'|trans }}" aria-label="{{ 'View console'|trans }}" href="{{ ('vps/control/vm/' ~ vm.vmid)|url }}">🖥</a>
+                <button class="btn btn-danger btn-sm vm-action-btn" title="{{ 'Delete VM'|trans }}" aria-label="{{ 'Delete VM'|trans }}" data-action="delete" data-vmid="{{ vm.vmid }}" data-vmname="{{ vm.name|default('VM #' ~ vm.vmid)|e('html_attr') }}" data-bs-toggle="modal" data-bs-target="#deleteVmModal">🗑</button>
+            </div>
+        </div>
+    </div>
+    {% if vm.snapshots is not empty %}
+    <div class="vm-snapshot-row mb-2" data-vmid="{{ vm.vmid }}">
+        <div class="vm-snapshot-box">
+            <div class="small text-secondary mb-1">
+                {{ 'Snapshots'|trans }}:
+                {{ vm.snapshot_total_size_gb|default(0)|number_format(2, '.', ',') }} GB
+                ({{ '$' ~ vm.snapshot_monthly_cost|default(0)|number_format(2, '.', ',') }}/{{ 'month'|trans }})
+            </div>
+            {% for snapshot in vm.snapshots %}
+                <div class="vm-snapshot-item">
+                    <div>
+                        <strong>{{ snapshot.name }}</strong>
+                        <small class="text-secondary">
+                            - {{ snapshot.size_gb|number_format(2, '.', ',') }} GB
+                            ({{ '$' ~ snapshot.monthly_cost|number_format(2, '.', ',') }}/{{ 'month'|trans }})
+                        </small>
+                    </div>
+                    <button
+                        class="btn btn-outline-success btn-sm vm-snapshot-restore-btn"
+                        data-vmid="{{ vm.vmid }}"
+                        data-snapshot-name="{{ snapshot.name|e('html_attr') }}"
+                    >{{ 'Restore'|trans }}</button>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+{% else %}
+    <p class="text-secondary">{{ 'No virtual machines found for your account yet.'|trans }}</p>
+{% endfor %}
+</div>
+                {% endif %}
+            </section>
+            {% if showContainerUi %}
+            <section class="mt-4">
+                <header>
+                    <h4>{{ 'Containers'|trans }}</h4>
+                </header>
+                <div class="vps-grid-row vps-grid-head mb-2">
+                    <div class="vps-grid-cell">CT</div>
+                    <div class="vps-grid-cell">{{ 'Uptime'|trans }}</div>
+                    <div class="vps-grid-cell">{{ 'Status'|trans }}</div>
+                    <div class="vps-grid-cell">{{ 'Memory'|trans }}</div>
+                    <div class="vps-grid-cell">{{ 'Template'|trans }}</div>
+                    <div class="vps-grid-cell">{{ 'IP Address'|trans }}</div>
+                    <div class="vps-grid-cell">{{ 'Action'|trans }}</div>
+                </div>
+                {% set containerRows = client.vps_containers_overview() %}
+                <div id="vpsContainerRowsContainer">
+                    {% for ct in containerRows %}
+                        <div class="vps-grid-row mb-2 container-row" data-ctid="{{ ct.ctid }}">
+                            <div class="vps-grid-cell">{{ ct.name|default('CT #' ~ ct.ctid) }} <small class="text-secondary">#{{ ct.ctid }}</small></div>
+                            <div class="vps-grid-cell"><small>{{ ct.uptime_hours is not null ? (ct.uptime_hours ~ ' ' ~ ('hours'|trans)) : '-' }}</small></div>
+                            <div class="vps-grid-cell">{{ ct.status|default('unknown')|upper }}</div>
+                            <div class="vps-grid-cell">{{ ct.memory_mb is not null ? (ct.memory_mb ~ 'MB') : '-' }}</div>
+                            <div class="vps-grid-cell"><small>{{ ct.template ?: '-' }}</small></div>
+                            <div class="vps-grid-cell"><small>{{ ct.ip_address ?: '-' }}</small></div>
+                            <div class="vps-grid-cell">
+                                <div class="d-flex flex-nowrap gap-1">
+                                    {% if ct.status != "running" %}
+                                        <button class="btn btn-primary btn-sm container-action-btn" title="{{ 'Power on'|trans }}" aria-label="{{ 'Power on'|trans }}" data-action="start" data-ctid="{{ ct.ctid }}">▶</button>
+                                    {% endif %}
+                                    {% if ct.status == "running" %}
+                                        <button class="btn btn-primary btn-sm container-action-btn" title="{{ 'Reboot'|trans }}" aria-label="{{ 'Reboot'|trans }}" data-action="reboot" data-ctid="{{ ct.ctid }}">↻</button>
+                                        <button class="btn btn-secondary btn-sm container-action-btn" title="{{ 'Power off'|trans }}" aria-label="{{ 'Power off'|trans }}" data-action="stop" data-ctid="{{ ct.ctid }}">⏹</button>
+                                    {% endif %}
+                                    <button class="btn btn-outline-primary btn-sm container-action-btn" title="{{ 'Access details'|trans }}" aria-label="{{ 'Access details'|trans }}" data-action="access" data-ctid="{{ ct.ctid }}" data-ctname="{{ ct.name|default('CT #' ~ ct.ctid)|e('html_attr') }}">🔐</button>
+                                    <button class="btn btn-outline-warning btn-sm container-action-btn" title="{{ 'Reset root password'|trans }}" aria-label="{{ 'Reset root password'|trans }}" data-action="reset-password" data-ctid="{{ ct.ctid }}">🔑</button>
+                                    <button class="btn btn-danger btn-sm container-action-btn" title="{{ 'Delete container'|trans }}" aria-label="{{ 'Delete container'|trans }}" data-action="delete" data-ctid="{{ ct.ctid }}" data-ctname="{{ ct.name|default('CT #' ~ ct.ctid)|e('html_attr') }}">🗑</button>
+                                </div>
+                            </div>
+                        </div>
+                    {% else %}
+                        <p class="text-secondary">{{ 'No containers found for your account yet.'|trans }}</p>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
+
+            {% if not isContainersPage %}
+            <section class="mt-4">
+                <h4>{{ 'Create a VM'|trans }}</h4>
+                <form method="post" action="{{ 'vps/provision_vm'|api_url }}" id="create-vm" class="create-vm">
+                    <input type="hidden" name="CSRFToken" value="{{ CSRFToken }}"/>
+                    <input type="hidden" name="client_id" value="{{ profile.id }}">
+
+                    <div class="mb-3">
+                        <label for="vm_name" class="form-label">{{ 'Name'|trans }}</label>
+                        <input class="form-control" type="text" name="vm_name" id="vm_name" value="{{ request.vm_name|default('')|e }}" required/>
+                    </div>
+                    <div class="mb-3">
+                        <label for="vm_os" class="form-label">{{ 'Operating System'|trans }}</label>
+                        <select class="form-select" name="vm_os" id="vm_os" required>
+                            <option value="" selected disabled>{{ 'Choose operating system'|trans }}</option>
+                            <option value="alma9">AlmaLinux 9</option>
+                            <option value="alma10">AlmaLinux 10</option>
+                            <option value="rock9">Rocky Linux 9</option>
+                            <option value="rock10">Rocky Linux 10</option>
+                            <option value="cent9">CentOS Stream 9</option>
+                            <option value="cent10">CentOS Stream 10</option>
+                            <option value="ubu22">Ubuntu 22.04</option>
+                            <option value="ubu24">Ubuntu 24.04</option>
+														<option value="ubu26">Ubuntu 26.04</option>
+                            <option value="deb135">Debian 13.5.0</option>
+                            <option value="bsd151">FreeBSD 15.1</option>
+                            <option disabled="disabled" value="win19">Windows Server 2019 - Coming Soon</option>
+                            <option value="win22">Windows Server 2022</option>
+                            <option disabled="disabled" value="win25">Windows Server 2025 - Coming Soon</option>
+                        </select>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-6">
+                            <label for="vm_cpu" class="form-label">{{ 'vCPU'|trans }}</label>
+                            <input type="range" class="form-range" min="2" max="64" step="2" name="vm_cpu" id="vm_cpu" value="2" oninput="this.nextElementSibling.value = this.value" required/>
+                            <output class="vm_cpu_value">2</output> vCPU
+                        </div>
+                        <div class="col-6">
+                            <label for="vm_mem" class="form-label">{{ 'Memory'|trans }}</label>
+                            <input type="range" class="form-range" min="4" max="64" step="2" name="vm_mem" id="vm_mem" value="4" oninput="this.nextElementSibling.value = this.value" required/>
+                            <output class="vm_mem_value">4</output> GB
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-6">
+                            <label for="vm_disk_size" class="form-label">{{ 'Disk Size'|trans }}</label>
+                            <input type="range" class="form-range" min="10" max="1000" step="5" name="vm_disk_size" id="vm_disk_size" value="10" oninput="this.nextElementSibling.value = this.value" required/>
+                            <output class="vm_disk_size_value">10</output> GB
+                        </div>
+                        <div class="col-6">
+                            <label for="vm_disk_type" class="form-label">{{ 'Disk Type'|trans }}</label>
+                            <select class="form-select" name="vm_disk_type" id="vm_disk_type">
+                                <option value="sata">SATA</option>
+                                <option value="ssd">SSD</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="vm_network_mode" class="form-label">{{ 'Network'|trans }}</label>
+                        <select class="form-select" name="network_mode" id="vm_network_mode">
+                            <option value="public">{{ 'Publicly accessible'|trans }}</option>
+                            <option value="internal">{{ 'Internal network'|trans }}</option>
+                            <option value="ipv6_only">{{ 'IPv6-only'|trans }}</option>
+                        </select>
+                    </div>
+                    <div class="row">
+                        <div class="col-2">
+                            <label for="vm_cost" class="form-label">{{ 'VM Cost'|trans }}</label>
+                            <input class="form-control" type="text" id="vm_cost" value="$7.00" disabled />
+                            <input type="hidden" name="vm_cost" id="vm_cost_hidden" value="7.00" />
+                        </div>
+                        <div class="col-2">
+                            <label for="vm_ip_cost" class="form-label">{{ 'IP Cost'|trans }}</label>
+                            <input class="form-control" type="text" id="vm_ip_cost" value="$0.00" disabled />
+                        </div>
+                        <div class="col-8 d-flex align-items-end justify-content-end">
+                            <button type="submit" class="btn btn-primary provision" disabled>{{ 'Provision'|trans }}</button>
+                        </div>
+                    </div>
+                    <p class="small mt-2 mb-0 text-secondary" id="provision-eligibility-note"></p>
+                </form>
+            </section>
+            {% endif %}
+            {% if showContainerUi %}
+            <section class="mt-4">
+                <h4>{{ 'Provision Container'|trans }}</h4>
+                {% set containerTemplates = client.vps_container_templates() %}
+                <form method="post" action="{{ 'vps/container_provision'|api_url }}" id="create-container" class="create-container">
+                    <input type="hidden" name="CSRFToken" value="{{ CSRFToken }}"/>
+                    <input type="hidden" name="client_id" value="{{ profile.id }}">
+
+                    <div class="mb-3">
+                        <label for="ct_name" class="form-label">{{ 'Container Name'|trans }}</label>
+                        <input class="form-control" type="text" name="ct_name" id="ct_name" value="" required/>
+                    </div>
+                    <div class="mb-3">
+                        <label for="ct_template" class="form-label">{{ 'Template'|trans }}</label>
+                        <select class="form-select" name="template" id="ct_template" required>
+                            <option value="" selected disabled>{{ 'Choose template'|trans }}</option>
+                            {% for tpl in containerTemplates %}
+                                <option value="{{ tpl.volid|e('html_attr') }}">{{ tpl.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-6">
+                            <label for="ct_disk_size" class="form-label">{{ 'Disk Size'|trans }}</label>
+                            <input type="range" class="form-range" min="10" max="1000" step="5" name="ct_disk_size" id="ct_disk_size" value="10" oninput="this.nextElementSibling.value = this.value" required/>
+                            <output class="ct_disk_size_value">10</output> GB
+                        </div>
+                        <div class="col-6">
+                            <label for="ct_disk_type" class="form-label">{{ 'Disk Type'|trans }}</label>
+                            <select class="form-select" name="ct_disk_type" id="ct_disk_type">
+                                <option value="sata">SATA</option>
+                                <option value="ssd">SSD</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="ct_network_mode" class="form-label">{{ 'Network'|trans }}</label>
+                        <select class="form-select" name="network_mode" id="ct_network_mode">
+                            <option value="public">{{ 'Publicly accessible'|trans }}</option>
+                            <option value="internal">{{ 'Internal network'|trans }}</option>
+                            <option value="ipv6_only">{{ 'IPv6-only'|trans }}</option>
+                        </select>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-3">
+                            <label for="ct_cost" class="form-label">{{ 'Container Cost'|trans }}</label>
+                            <input class="form-control" type="text" id="ct_cost" value="$2.00" disabled />
+                        </div>
+                        <div class="col-3">
+                            <label for="ct_ip_cost" class="form-label">{{ 'Network Cost'|trans }}</label>
+                            <input class="form-control" type="text" id="ct_ip_cost" value="$0.00" disabled />
+                        </div>
+                    </div>
+                    <p class="small text-secondary mb-2">{{ 'Public/Internal use DHCP for IPv4+IPv6. IPv6-only disables IPv4 and keeps DHCPv6 enabled.'|trans }}</p>
+                    <p class="small mb-2 text-secondary" id="container-eligibility-note"></p>
+                    <div class="d-flex justify-content-end">
+                        <button type="submit" class="btn btn-primary container-provision-btn" disabled>{{ 'Provision Container'|trans }}</button>
+                    </div>
+                </form>
+            </section>
+            {% endif %}
+            {% if not isContainersPage %}
+            <section class="mt-4">
+                <h4>{{ 'Accrued Usage (Uninvoiced)'|trans }}</h4>
+                {% set usageSummary = client.vps_usage_summary() %}
+                {% if usageSummary.rows is not empty %}
+                    <p class="small text-secondary mb-2">
+                        {{ 'Total accrued'|trans }}: <strong>${{ usageSummary.total_amount|number_format(4, '.', ',') }}</strong>
+                        - {{ usageSummary.total_hours|number_format(2, '.', ',') }} {{ 'hours'|trans }}
+                        - {{ usageSummary.vm_count }} {{ 'VMs'|trans }}
+                    </p>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr>
+                                    <th>{{ 'VM'|trans }}</th>
+                                    <th>{{ 'Hours'|trans }}</th>
+                                    <th>{{ 'Amount'|trans }}</th>
+                                    <th>{{ 'Period'|trans }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in usageSummary.rows %}
+                                    <tr>
+                                        <td>{{ row.vm_name }} <small class="text-secondary">#{{ row.vmid }}</small></td>
+                                        <td>{{ row.hours|number_format(2, '.', ',') }}</td>
+                                        <td>${{ row.amount|number_format(4, '.', ',') }}</td>
+                                        <td>
+                                            <small>
+                                                {{ row.period_start ?: '-' }}<br>
+                                                {{ row.period_end ?: '-' }}
+                                            </small>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="text-secondary mb-0">{{ 'No uninvoiced VPS usage has accrued yet.'|trans }}</p>
+                {% endif %}
+            </section>
+            {% endif %}
+        </div>
+    </article>
+</div>
+
+<div class="modal fade" id="powerOnModal" tabindex="-1" aria-labelledby="powerOnModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="powerOnModalLabel">{{ 'Power on'|trans }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                {{ 'Are you sure you want to power on this VM? CPU and disk usage will accrue towards your monthly expenses.'|trans }}
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ 'No, close'|trans }}</button>
+                <button type="button" class="btn btn-primary btn-power-on">{{ 'Power on'|trans }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="powerOffModal" tabindex="-1" aria-labelledby="powerOffModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="powerOffModalLabel">{{ 'Power off'|trans }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                {{ 'Are you sure you want to power off this VM? CPU usage will stop counting toward your monthly tab, but disk usage will continue to accrue unless the VM is deleted.'|trans }}
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ 'No, go back'|trans }}</button>
+                <button type="button" class="btn btn-danger btn-power-off">{{ 'Power off'|trans }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="rebootVmModal" tabindex="-1" aria-labelledby="rebootVmModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="rebootVmModalLabel">{{ 'Reboot VM'|trans }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                {{ 'Are you sure you want to reboot this VM?'|trans }}
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ 'No, go back'|trans }}</button>
+                <button type="button" class="btn btn-info btn-reboot">{{ 'Reboot'|trans }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="provisionVmModal" tabindex="-1" aria-labelledby="provisionVmModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="provisionVmModalLabel">{{ 'Launching VM...'|trans }}</h5>
+            </div>
+            <div class="modal-body" id="provisionVmModalBody">
+                <div class="d-flex align-items-center gap-2">
+                    <div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div>
+                    <span>{{ 'Cloning template and configuring cloud-init. This may take a few minutes.'|trans }}</span>
+                </div>
+            </div>
+            <div class="modal-footer d-none" id="provisionVmModalFooter">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">{{ 'Close'|trans }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="provisionContainerModal" tabindex="-1" aria-labelledby="provisionContainerModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="provisionContainerModalLabel">{{ 'Launching Container...'|trans }}</h5>
+            </div>
+            <div class="modal-body" id="provisionContainerModalBody">
+                <div class="d-flex align-items-center gap-2">
+                    <div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div>
+                    <span>{{ 'Creating LXC container. This may take a few minutes.'|trans }}</span>
+                </div>
+            </div>
+            <div class="modal-footer d-none" id="provisionContainerModalFooter">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">{{ 'Close'|trans }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="vmAccessModal" tabindex="-1" aria-labelledby="vmAccessModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="vmAccessModalLabel">{{ 'VM Access Details'|trans }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="vmAccessModalBody">
+                <div class="d-flex align-items-center gap-2">
+                    <div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div>
+                    <span>{{ 'Loading access details...'|trans }}</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ 'Close'|trans }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="containerAccessModal" tabindex="-1" aria-labelledby="containerAccessModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="containerAccessModalLabel">{{ 'Container Access Details'|trans }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="containerAccessModalBody">
+                <div class="d-flex align-items-center gap-2">
+                    <div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div>
+                    <span>{{ 'Loading access details...'|trans }}</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ 'Close'|trans }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="duplicateVmModal" tabindex="-1" aria-labelledby="duplicateVmModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="duplicateVmModalLabel">{{ 'Duplicate VM'|trans }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-3">{{ 'Choose a name for the duplicated VM.'|trans }}</p>
+                <label for="duplicate_vm_name" class="form-label">{{ 'New VM name'|trans }}</label>
+                <input type="text" class="form-control" id="duplicate_vm_name" value="" maxlength="64"/>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ 'Cancel'|trans }}</button>
+                <button type="button" class="btn btn-info btn-duplicate">{{ 'Duplicate'|trans }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="deleteVmModal" tabindex="-1" aria-labelledby="deleteVmModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteVmModalLabel">{{ 'Delete VM'|trans }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="deleteVmModalBody">
+                {{ 'This will permanently delete the VM and stop billing from today. Are you sure?'|trans }}
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ 'Cancel'|trans }}</button>
+                <button type="button" class="btn btn-danger btn-delete">{{ 'Delete VM'|trans }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="actionProgressModal" tabindex="-1" aria-labelledby="actionProgressModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="actionProgressModalLabel">{{ 'Processing request...'|trans }}</h5>
+            </div>
+            <div class="modal-body" id="actionProgressModalBody">
+                <div class="d-flex align-items-center gap-2">
+                    <div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div>
+                    <span>{{ 'Submitting request...'|trans }}</span>
+                </div>
+            </div>
+            <div class="modal-footer d-none" id="actionProgressModalFooter">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">{{ 'Close'|trans }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="text/javascript">
+document.addEventListener('DOMContentLoaded', function() {
+    var selectedVmid = null;
+    var selectedVmName = '';
+    var selectedCtid = null;
+    var selectedContainerName = '';
+    var provisionModal = null;
+    var provisionContainerModal = null;
+    var actionProgressModal = null;
+    var folderState = { next_id: 1, folders: [], vm_assignments: {}, container_assignments: {} };
+    var currentBalance = parseFloat('{{ currentBalance|default(0) }}') || 0;
+    var hasActiveSubscription = {{ hasActiveSubscription ? 'true' : 'false' }};
+    var billingBypassEnabled = {{ billingBypassEnabled ? 'true' : 'false' }};
+
+    function getProvisionModal() {
+        if (!provisionModal) {
+            provisionModal = new bootstrap.Modal(document.getElementById('provisionVmModal'));
+        }
+        return provisionModal;
+    }
+
+    function getProvisionContainerModal() {
+        if (!provisionContainerModal) {
+            provisionContainerModal = new bootstrap.Modal(document.getElementById('provisionContainerModal'));
+        }
+        return provisionContainerModal;
+    }
+
+    function getActionProgressModal() {
+        if (!actionProgressModal) {
+            actionProgressModal = new bootstrap.Modal(document.getElementById('actionProgressModal'));
+        }
+        return actionProgressModal;
+    }
+
+    function setActionProgress(title, bodyHtml, showFooter) {
+        var titleEl = document.getElementById('actionProgressModalLabel');
+        var bodyEl = document.getElementById('actionProgressModalBody');
+        var footerEl = document.getElementById('actionProgressModalFooter');
+        if (titleEl) {
+            titleEl.textContent = title;
+        }
+        if (bodyEl) {
+            bodyEl.innerHTML = bodyHtml;
+        }
+        if (footerEl) {
+            if (showFooter) {
+                footerEl.classList.remove('d-none');
+            } else {
+                footerEl.classList.add('d-none');
+            }
+        }
+    }
+
+    function postWithRetry(endpoint, payload, options) {
+        var opts = options || {};
+        var retries = typeof opts.retries === 'number' ? opts.retries : 4;
+        var delayMs = typeof opts.delayMs === 'number' ? opts.delayMs : 2500;
+        var attempt = 0;
+
+        function run() {
+            attempt += 1;
+            FOSSBilling.api.client.post(endpoint, payload,
+                function(result) {
+                    if (typeof opts.onSuccess === 'function') {
+                        opts.onSuccess(result, attempt);
+                    }
+                },
+                function(res) {
+                    if (attempt <= retries) {
+                        if (typeof opts.onRetry === 'function') {
+                            opts.onRetry(attempt, retries, res);
+                        }
+                        setTimeout(run, delayMs);
+                        return;
+                    }
+                    if (typeof opts.onFailure === 'function') {
+                        opts.onFailure(res, attempt);
+                    }
+                }
+            );
+        }
+
+        run();
+    }
+
+    function loadFolderState(callback) {
+        FOSSBilling.api.client.post('vps/vm_folders', {},
+            function(result) {
+                folderState = result || { next_id: 1, folders: [], vm_assignments: {}, container_assignments: {} };
+                folderState.vm_assignments = folderState.vm_assignments || folderState.assignments || {};
+                folderState.container_assignments = folderState.container_assignments || {};
+                if (typeof callback === 'function') {
+                    callback();
+                }
+            },
+            function() {
+                if (typeof callback === 'function') {
+                    callback();
+                }
+            }
+        );
+    }
+
+    function applyFolderStateAndRender(result) {
+        if (result) {
+            folderState = result;
+            folderState.vm_assignments = folderState.vm_assignments || folderState.assignments || {};
+            folderState.container_assignments = folderState.container_assignments || {};
+            refreshFolderDeleteSelect();
+            groupVmRowsByFolder();
+            groupContainerRowsByFolder();
+            return;
+        }
+
+        loadFolderState(function() {
+            groupVmRowsByFolder();
+            groupContainerRowsByFolder();
+        });
+    }
+
+    function refreshFolderDeleteSelect() {
+        var deleteSelect = document.getElementById('deleteVmFolderSelect');
+        if (!deleteSelect) {
+            return;
+        }
+        deleteSelect.innerHTML = '<option value="">{{ 'Select folder to delete'|trans }}</option>';
+        (folderState.folders || []).forEach(function(folder) {
+            var opt = document.createElement('option');
+            opt.value = String(folder.id);
+            opt.textContent = folder.name || ('Folder ' + folder.id);
+            deleteSelect.appendChild(opt);
+        });
+    }
+
+    function createFolderSelect(entityType, entityId) {
+        var select = document.createElement('select');
+        select.className = 'form-select form-select-sm';
+        select.style.maxWidth = '160px';
+        var optUngrouped = document.createElement('option');
+        optUngrouped.value = '';
+        optUngrouped.textContent = '{{ 'Ungrouped'|trans }}';
+        select.appendChild(optUngrouped);
+
+        (folderState.folders || []).forEach(function(folder) {
+            var option = document.createElement('option');
+            option.value = String(folder.id);
+            option.textContent = folder.name;
+            select.appendChild(option);
+        });
+
+        var assignmentMap = entityType === 'container'
+            ? (folderState.container_assignments || {})
+            : (folderState.vm_assignments || {});
+        var assigned = assignmentMap[String(entityId)] ? String(assignmentMap[String(entityId)]) : '';
+        select.value = assigned;
+        select.addEventListener('change', function() {
+            var endpoint = entityType === 'container' ? 'vps/container_folder_assign' : 'vps/vm_folder_assign';
+            var payload = entityType === 'container'
+                ? { ctid: entityId, folder_id: select.value }
+                : { vmid: entityId, folder_id: select.value };
+            FOSSBilling.api.client.post(endpoint,
+                payload,
+                function(result) {
+                    folderState = result || folderState;
+                    folderState.vm_assignments = folderState.vm_assignments || folderState.assignments || {};
+                    folderState.container_assignments = folderState.container_assignments || {};
+                    groupVmRowsByFolder();
+                    groupContainerRowsByFolder();
+                },
+                function(res) {
+                    FOSSBilling.message((res.message || 'Folder assignment failed') + (res.code ? ' (' + res.code + ')' : ''), 'error');
+                }
+            );
+        });
+
+        return select;
+    }
+
+    function groupVmRowsByFolder() {
+        var container = document.getElementById('vpsVmRowsContainer');
+        if (!container) {
+            return;
+        }
+        refreshFolderDeleteSelect();
+        var rows = Array.from(container.querySelectorAll('.vm-row'));
+        var snapshotRowsByVmid = {};
+        Array.from(container.querySelectorAll('.vm-snapshot-row')).forEach(function(snapshotRow) {
+            var vmid = String(snapshotRow.dataset.vmid || '');
+            if (!vmid) {
+                return;
+            }
+            snapshotRowsByVmid[vmid] = snapshotRow;
+        });
+        if (!rows.length) {
+            return;
+        }
+
+        rows.forEach(function(row) {
+            var vmid = String(row.dataset.vmid || '');
+            var actionCell = row.querySelector('.vps-grid-cell:last-child');
+            if (actionCell && !actionCell.querySelector('.vm-folder-select-wrap')) {
+                var wrap = document.createElement('div');
+                wrap.className = 'vm-folder-select-wrap ms-1';
+                wrap.appendChild(createFolderSelect('vm', vmid));
+                actionCell.querySelector('.d-flex')?.appendChild(wrap);
+            }
+        });
+
+        var byFolder = { '0': [] };
+        rows.forEach(function(row) {
+            var vmid = String(row.dataset.vmid || '0');
+            var folderId = String((folderState.vm_assignments && folderState.vm_assignments[vmid]) ? folderState.vm_assignments[vmid] : 0);
+            if (!byFolder[folderId]) {
+                byFolder[folderId] = [];
+            }
+            byFolder[folderId].push(row);
+        });
+
+        container.innerHTML = '';
+
+        function appendSection(folderId, folderName, collapsed, sectionRows) {
+            var rowsForSection = Array.isArray(sectionRows) ? sectionRows : [];
+            if (folderId === '0' && rowsForSection.length === 0) {
+                return;
+            }
+            var details = document.createElement('details');
+            details.className = 'mb-2';
+            details.dataset.folderId = folderId;
+            details.open = !collapsed;
+            var summary = document.createElement('summary');
+            summary.className = 'd-flex align-items-center gap-2 mb-2';
+            summary.innerHTML = '<strong>' + folderName + '</strong> <small>(' + rowsForSection.length + ')</small>';
+            if (folderId !== '0') {
+                var renameBtn = document.createElement('button');
+                renameBtn.type = 'button';
+                renameBtn.className = 'btn btn-outline-secondary btn-sm ms-2 folder-rename-btn';
+                renameBtn.dataset.folderId = folderId;
+                renameBtn.textContent = '{{ 'Rename'|trans }}';
+                summary.appendChild(renameBtn);
+
+                var deleteBtn = document.createElement('button');
+                deleteBtn.type = 'button';
+                deleteBtn.className = 'btn btn-outline-danger btn-sm folder-delete-btn';
+                deleteBtn.dataset.folderId = folderId;
+                deleteBtn.textContent = '{{ 'Delete'|trans }}';
+                summary.appendChild(deleteBtn);
+            }
+            details.appendChild(summary);
+            if (rowsForSection.length === 0) {
+                var empty = document.createElement('p');
+                empty.className = 'text-secondary mb-2';
+                empty.textContent = '{{ 'No VMs in this folder yet.'|trans }}';
+                details.appendChild(empty);
+            } else {
+                rowsForSection.forEach(function(row) {
+                    details.appendChild(row);
+                    var vmid = String(row.dataset.vmid || '');
+                    if (snapshotRowsByVmid[vmid]) {
+                        details.appendChild(snapshotRowsByVmid[vmid]);
+                    }
+                });
+            }
+            details.addEventListener('toggle', function() {
+                if (folderId === '0') {
+                    return;
+                }
+                FOSSBilling.api.client.post('vps/vm_folder_toggle', {
+                    folder_id: folderId,
+                    collapsed: details.open ? 0 : 1,
+                    scope: 'vm'
+                }, function(result) {
+                    folderState = result || folderState;
+                }, function() {});
+            });
+            container.appendChild(details);
+        }
+
+        appendSection('0', '{{ 'Ungrouped'|trans }}', false, byFolder['0'] || []);
+        (folderState.folders || []).forEach(function(folder) {
+            appendSection(String(folder.id), folder.name || ('Folder ' + folder.id), !!folder.collapsed, byFolder[String(folder.id)] || []);
+        });
+    }
+
+    function groupContainerRowsByFolder() {
+        var container = document.getElementById('vpsContainerRowsContainer');
+        if (!container) {
+            return;
+        }
+        var rows = Array.from(container.querySelectorAll('.container-row'));
+        if (!rows.length) {
+            return;
+        }
+
+        rows.forEach(function(row) {
+            var ctid = String(row.dataset.ctid || '');
+            var actionCell = row.querySelector('.vps-grid-cell:last-child');
+            if (actionCell && !actionCell.querySelector('.container-folder-select-wrap')) {
+                var wrap = document.createElement('div');
+                wrap.className = 'container-folder-select-wrap ms-1';
+                wrap.appendChild(createFolderSelect('container', ctid));
+                actionCell.querySelector('.d-flex')?.appendChild(wrap);
+            }
+        });
+
+        var byFolder = { '0': [] };
+        rows.forEach(function(row) {
+            var ctid = String(row.dataset.ctid || '0');
+            var folderId = String((folderState.container_assignments && folderState.container_assignments[ctid]) ? folderState.container_assignments[ctid] : 0);
+            if (!byFolder[folderId]) {
+                byFolder[folderId] = [];
+            }
+            byFolder[folderId].push(row);
+        });
+
+        container.innerHTML = '';
+
+        function appendSection(folderId, folderName, collapsed, sectionRows) {
+            var rowsForSection = Array.isArray(sectionRows) ? sectionRows : [];
+            if (folderId === '0' && rowsForSection.length === 0) {
+                return;
+            }
+            var details = document.createElement('details');
+            details.className = 'mb-2';
+            details.dataset.folderId = folderId;
+            details.open = !collapsed;
+            var summary = document.createElement('summary');
+            summary.className = 'd-flex align-items-center gap-2 mb-2';
+            summary.innerHTML = '<strong>' + folderName + '</strong> <small>(' + rowsForSection.length + ')</small>';
+            details.appendChild(summary);
+
+            if (rowsForSection.length === 0) {
+                var empty = document.createElement('p');
+                empty.className = 'text-secondary mb-2';
+                empty.textContent = '{{ 'No containers in this folder yet.'|trans }}';
+                details.appendChild(empty);
+            } else {
+                rowsForSection.forEach(function(row) {
+                    details.appendChild(row);
+                });
+            }
+
+            details.addEventListener('toggle', function() {
+                if (folderId === '0') {
+                    return;
+                }
+                FOSSBilling.api.client.post('vps/vm_folder_toggle', {
+                    folder_id: folderId,
+                    collapsed: details.open ? 0 : 1,
+                    scope: 'container'
+                }, function(result) {
+                    folderState = result || folderState;
+                    folderState.vm_assignments = folderState.vm_assignments || folderState.assignments || {};
+                    folderState.container_assignments = folderState.container_assignments || {};
+                }, function() {});
+            });
+
+            container.appendChild(details);
+        }
+
+        appendSection('0', '{{ 'Ungrouped'|trans }}', false, byFolder['0'] || []);
+        (folderState.folders || []).forEach(function(folder) {
+            appendSection(String(folder.id), folder.name || ('Folder ' + folder.id), !!folder.container_collapsed, byFolder[String(folder.id)] || []);
+        });
+    }
+
+    var createFolderButton = document.getElementById('createVmFolderBtn');
+    if (createFolderButton) {
+        createFolderButton.addEventListener('click', function() {
+            var input = document.getElementById('newVmFolderName');
+            var name = input ? input.value.trim() : '';
+            if (!name) {
+                name = (prompt('{{ 'Enter a folder name'|trans }}') || '').trim();
+            }
+            if (!name) {
+                FOSSBilling.message('{{ 'Folder name is required'|trans }}', 'error');
+                return;
+            }
+
+            FOSSBilling.api.client.post('vps/vm_folder_create', { name: name },
+                function(result) {
+                    if (input) {
+                        input.value = '';
+                    }
+                    applyFolderStateAndRender(result);
+                },
+                function(res) {
+                    FOSSBilling.message((res.message || 'Folder creation failed') + (res.code ? ' (' + res.code + ')' : ''), 'error');
+                }
+            );
+        });
+    }
+
+    var deleteFolderButton = document.getElementById('deleteVmFolderBtn');
+    if (deleteFolderButton) {
+        deleteFolderButton.addEventListener('click', function() {
+            var select = document.getElementById('deleteVmFolderSelect');
+            var folderId = select ? String(select.value || '') : '';
+            if (!folderId) {
+                FOSSBilling.message('{{ 'Select a folder to delete'|trans }}', 'error');
+                return;
+            }
+            if (!confirm('{{ 'Delete this folder? Assigned VMs and containers will become ungrouped.'|trans }}')) {
+                return;
+            }
+            FOSSBilling.api.client.post('vps/vm_folder_delete', { folder_id: folderId },
+                function(result) {
+                    if (select) {
+                        select.value = '';
+                    }
+                    applyFolderStateAndRender(result);
+                },
+                function(res) {
+                    FOSSBilling.message((res.message || 'Delete failed') + (res.code ? ' (' + res.code + ')' : ''), 'error');
+                }
+            );
+        });
+    }
+
+    document.querySelectorAll('.vm-action-btn').forEach(function(button) {
+        button.addEventListener('click', function() {
+            selectedVmid = button.dataset.vmid;
+            selectedVmName = button.dataset.vmname || '';
+            var label = document.getElementById('rebootVmModalLabel');
+            if (label && button.dataset.action === 'reboot') {
+                label.textContent = '{{ 'Reboot VM'|trans }} ' + selectedVmid;
+            }
+            if (button.dataset.action === 'duplicate') {
+                var duplicateName = document.getElementById('duplicate_vm_name');
+                if (duplicateName) {
+                    duplicateName.value = (selectedVmName || ('vm-' + selectedVmid)) + '-copy';
+                }
+            }
+            if (button.dataset.action === 'delete') {
+                var deleteBody = document.getElementById('deleteVmModalBody');
+                if (deleteBody) {
+                    deleteBody.textContent = '{{ 'This will permanently delete the VM and stop billing from today. Are you sure?'|trans }}' + ' (' + (selectedVmName || ('VM #' + selectedVmid)) + ')';
+                }
+            }
+            if (button.dataset.action === 'access') {
+                showVmAccessDetails();
+            }
+            if (button.dataset.action === 'reset-password') {
+                if (!confirm('{{ 'Reset root password now? This will restart cloud-init credential flow.'|trans }}')) {
+                    return;
+                }
+                getActionProgressModal().show();
+                setActionProgress('{{ 'Resetting VM root password...'|trans }}', '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Submitting request...'|trans }}</span></div>', false);
+                postWithRetry('vps/vm_reset_root_password', { vmid: selectedVmid }, {
+                    retries: 5,
+                    delayMs: 3000,
+                    onRetry: function(attempt, retries) {
+                        setActionProgress('{{ 'Resetting VM root password...'|trans }}', '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Host busy, retrying...'|trans }} (' + attempt + '/' + retries + ')</span></div>', false);
+                    },
+                    onSuccess: function(result) {
+                        var body = document.getElementById('vmAccessModalBody');
+                        if (body) {
+                            body.innerHTML = '<p class="text-success mb-2"><strong>{{ 'Root password reset complete'|trans }}</strong></p>'
+                                + '<p class="mb-1">{{ 'VM ID'|trans }}: <strong>' + escapeHtml(result.vmid) + '</strong></p>'
+                                + '<p class="mb-1">{{ 'IP address'|trans }}: <strong>' + escapeHtml(result.ip_address || '-') + '</strong></p>'
+                                + '<p class="mb-0">{{ 'Root password'|trans }}: <code>' + escapeHtml(result.root_password || '') + '</code></p>';
+                            var modalEl = document.getElementById('vmAccessModal');
+                            if (modalEl) {
+                                new bootstrap.Modal(modalEl).show();
+                            }
+                        }
+                        setActionProgress('{{ 'Action completed'|trans }}', '<p class="text-success mb-0"><strong>{{ 'Root password reset requested'|trans }}</strong></p>', true);
+                    },
+                    onFailure: function(res) {
+                        setActionProgress('{{ 'Action failed'|trans }}', '<p class="text-danger mb-0"><strong>{{ 'Password reset failed after retries.'|trans }}</strong><br>' + escapeHtml((res && res.message) ? res.message : 'Unknown error') + '</p>', true);
+                    }
+                });
+            }
+            if (button.dataset.action === 'take-snapshot') {
+                if (!confirm('{{ 'Take a snapshot now? Snapshot storage will be billed at SATA disk rates while it exists.'|trans }}')) {
+                    return;
+                }
+                getActionProgressModal().show();
+                setActionProgress('{{ 'Starting snapshot...'|trans }}', '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Submitting request...'|trans }}</span></div>', false);
+                postWithRetry('vps/vm_snapshot_take_async', { vmid: selectedVmid }, {
+                    retries: 5,
+                    delayMs: 3000,
+                    onRetry: function(attempt, retries) {
+                        setActionProgress('{{ 'Starting snapshot...'|trans }}', '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Host busy, retrying...'|trans }} (' + attempt + '/' + retries + ')</span></div>', false);
+                    },
+                    onSuccess: function(result) {
+                        setActionProgress('{{ 'Snapshot started'|trans }}', '<p class="text-success mb-0"><strong>{{ 'Snapshot started in background. You can leave this page.'|trans }}</strong></p>', false);
+                        FOSSBilling.message('{{ 'Snapshot started in background. You can leave this page.'|trans }}', 'success');
+                        if (result && result.task_id) {
+                            pollSnapshotTask(result.task_id, '{{ 'Snapshot created successfully'|trans }}');
+                        }
+                    },
+                    onFailure: function(res) {
+                        setActionProgress('{{ 'Action failed'|trans }}', '<p class="text-danger mb-0"><strong>{{ 'Snapshot request failed after retries.'|trans }}</strong><br>' + escapeHtml((res && res.message) ? res.message : 'Unknown error') + '</p>', true);
+                    }
+                });
+            }
+        });
+    });
+
+    document.querySelectorAll('.container-action-btn').forEach(function(button) {
+        button.addEventListener('click', function() {
+            selectedCtid = button.dataset.ctid;
+            selectedContainerName = button.dataset.ctname || ('CT #' + selectedCtid);
+            var action = button.dataset.action;
+
+            if (action === 'access') {
+                showContainerAccessDetails();
+                return;
+            }
+
+            if (action === 'reset-password') {
+                if (!confirm('{{ 'Reset root password for this container now?'|trans }}')) {
+                    return;
+                }
+                getActionProgressModal().show();
+                setActionProgress('{{ 'Resetting container root password...'|trans }}', '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Submitting request...'|trans }}</span></div>', false);
+                postWithRetry('vps/container_reset_root_password', { ctid: selectedCtid }, {
+                    retries: 5,
+                    delayMs: 3000,
+                    onRetry: function(attempt, retries) {
+                        setActionProgress('{{ 'Resetting container root password...'|trans }}', '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Host busy, retrying...'|trans }} (' + attempt + '/' + retries + ')</span></div>', false);
+                    },
+                    onSuccess: function(result) {
+                        var body = document.getElementById('containerAccessModalBody');
+                        if (body) {
+                            body.innerHTML = '<p class="text-success mb-2"><strong>{{ 'Root password reset complete'|trans }}</strong></p>'
+                                + '<p class="mb-1">{{ 'Container ID'|trans }}: <strong>' + escapeHtml(result.ctid) + '</strong></p>'
+                                + '<p class="mb-1">{{ 'IP address'|trans }}: <strong>' + escapeHtml(result.ip_address || '-') + '</strong></p>'
+                                + '<p class="mb-0">{{ 'Root password'|trans }}: <code>' + escapeHtml(result.root_password || '') + '</code></p>';
+                            var modalEl = document.getElementById('containerAccessModal');
+                            if (modalEl) {
+                                new bootstrap.Modal(modalEl).show();
+                            }
+                        }
+                        setActionProgress('{{ 'Action completed'|trans }}', '<p class="text-success mb-0"><strong>{{ 'Container root password reset requested'|trans }}</strong></p>', true);
+                    },
+                    onFailure: function(res) {
+                        setActionProgress('{{ 'Action failed'|trans }}', '<p class="text-danger mb-0"><strong>{{ 'Password reset failed after retries.'|trans }}</strong><br>' + escapeHtml((res && res.message) ? res.message : 'Unknown error') + '</p>', true);
+                    }
+                });
+                return;
+            }
+
+            if (action === 'delete') {
+                if (!confirm('{{ 'Delete this container permanently?'|trans }}' + ' (' + selectedContainerName + ')')) {
+                    return;
+                }
+            }
+            if (action === 'reboot') {
+                if (!confirm('{{ 'Are you sure you want to reboot this container?'|trans }}')) {
+                    return;
+                }
+            }
+
+            var endpoint = '';
+            var successMessage = '';
+            if (action === 'start') {
+                endpoint = 'vps/container_start';
+                successMessage = '{{ 'Container powered on'|trans }}';
+            } else if (action === 'stop') {
+                endpoint = 'vps/container_stop';
+                successMessage = '{{ 'Container powered off'|trans }}';
+            } else if (action === 'reboot') {
+                endpoint = 'vps/container_reboot';
+                successMessage = '{{ 'Container rebooted'|trans }}';
+            } else if (action === 'delete') {
+                endpoint = 'vps/container_delete';
+                successMessage = '{{ 'Container deleted'|trans }}';
+            }
+
+            if (endpoint) {
+                runContainerAction(endpoint, successMessage);
+            }
+        });
+    });
+
+    document.addEventListener('click', function(event) {
+        var renameButton = event.target.closest('.folder-rename-btn');
+        if (renameButton) {
+            event.preventDefault();
+            event.stopPropagation();
+            var folderId = renameButton.dataset.folderId;
+            var nextName = prompt('{{ 'New folder name'|trans }}');
+            if (!nextName) {
+                return;
+            }
+            FOSSBilling.api.client.post('vps/vm_folder_rename', { folder_id: folderId, name: nextName },
+                function(result) {
+                    applyFolderStateAndRender(result);
+                },
+                function(res) {
+                    FOSSBilling.message((res.message || 'Rename failed') + (res.code ? ' (' + res.code + ')' : ''), 'error');
+                }
+            );
+            return;
+        }
+
+        var deleteButton = event.target.closest('.folder-delete-btn');
+        if (deleteButton) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!confirm('{{ 'Delete this folder? Assigned VMs and containers will become ungrouped.'|trans }}')) {
+                return;
+            }
+            var folderId = deleteButton.dataset.folderId;
+            FOSSBilling.api.client.post('vps/vm_folder_delete', { folder_id: folderId },
+                function(result) {
+                    applyFolderStateAndRender(result);
+                },
+                function(res) {
+                    FOSSBilling.message((res.message || 'Delete failed') + (res.code ? ' (' + res.code + ')' : ''), 'error');
+                }
+            );
+        }
+    });
+
+    function runVmAction(endpoint, successMessage) {
+        if (!selectedVmid) {
+            return;
+        }
+        getActionProgressModal().show();
+        setActionProgress(
+            '{{ 'Processing VM action...'|trans }}',
+            '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Submitting request...'|trans }}</span></div>',
+            false
+        );
+        postWithRetry(endpoint, { vmid: selectedVmid }, {
+            retries: 5,
+            delayMs: 3000,
+            onRetry: function(attempt, retries) {
+                setActionProgress(
+                    '{{ 'Processing VM action...'|trans }}',
+                    '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Host busy, retrying...'|trans }} (' + attempt + '/' + retries + ')</span></div>',
+                    false
+                );
+            },
+            onSuccess: function() {
+                setActionProgress(
+                    '{{ 'Action completed'|trans }}',
+                    '<p class="text-success mb-0"><strong>' + escapeHtml(successMessage) + '</strong></p><p class="small text-secondary mt-2 mb-0">{{ 'Refreshing page...'|trans }}</p>',
+                    false
+                );
+                window.setTimeout(function() {
+                    window.location.reload();
+                }, 900);
+            },
+            onFailure: function(res) {
+                setActionProgress(
+                    '{{ 'Action failed'|trans }}',
+                    '<p class="text-danger mb-0"><strong>{{ 'Request failed after several retries.'|trans }}</strong><br>' + escapeHtml((res && res.message) ? res.message : 'Unknown error') + '</p>',
+                    true
+                );
+            }
+        });
+    }
+
+    function runContainerAction(endpoint, successMessage) {
+        if (!selectedCtid) {
+            return;
+        }
+        getActionProgressModal().show();
+        setActionProgress(
+            '{{ 'Processing container action...'|trans }}',
+            '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Submitting request...'|trans }}</span></div>',
+            false
+        );
+        postWithRetry(endpoint, { ctid: selectedCtid }, {
+            retries: 5,
+            delayMs: 3000,
+            onRetry: function(attempt, retries) {
+                setActionProgress(
+                    '{{ 'Processing container action...'|trans }}',
+                    '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Host busy, retrying...'|trans }} (' + attempt + '/' + retries + ')</span></div>',
+                    false
+                );
+            },
+            onSuccess: function() {
+                setActionProgress(
+                    '{{ 'Action completed'|trans }}',
+                    '<p class="text-success mb-0"><strong>' + escapeHtml(successMessage) + '</strong></p><p class="small text-secondary mt-2 mb-0">{{ 'Refreshing page...'|trans }}</p>',
+                    false
+                );
+                window.setTimeout(function() {
+                    window.location.reload();
+                }, 900);
+            },
+            onFailure: function(res) {
+                setActionProgress(
+                    '{{ 'Action failed'|trans }}',
+                    '<p class="text-danger mb-0"><strong>{{ 'Request failed after several retries.'|trans }}</strong><br>' + escapeHtml((res && res.message) ? res.message : 'Unknown error') + '</p>',
+                    true
+                );
+            }
+        });
+    }
+
+    document.querySelector('.btn-power-on')?.addEventListener('click', function() {
+        runVmAction('vps/vm_start', '{{ 'VM powered on'|trans }}');
+    });
+
+    document.querySelector('.btn-power-off')?.addEventListener('click', function() {
+        runVmAction('vps/vm_stop', '{{ 'VM powered off'|trans }}');
+    });
+
+    document.querySelector('.btn-reboot')?.addEventListener('click', function() {
+        runVmAction('vps/vm_reboot', '{{ 'VM rebooted'|trans }}');
+    });
+
+    document.querySelector('.btn-duplicate')?.addEventListener('click', function() {
+        if (!selectedVmid) {
+            return;
+        }
+
+        var duplicateNameInput = document.getElementById('duplicate_vm_name');
+        var duplicateName = duplicateNameInput ? duplicateNameInput.value.trim() : '';
+        getActionProgressModal().show();
+        setActionProgress('{{ 'Duplicating VM...'|trans }}', '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Submitting request...'|trans }}</span></div>', false);
+        postWithRetry('vps/vm_duplicate',
+            { vmid: selectedVmid, vm_name: duplicateName },
+            {
+            retries: 5,
+            delayMs: 3000,
+            onRetry: function(attempt, retries) {
+                setActionProgress('{{ 'Duplicating VM...'|trans }}', '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Host busy, retrying...'|trans }} (' + attempt + '/' + retries + ')</span></div>', false);
+            },
+            onSuccess: function(result) {
+                FOSSBilling.message('{{ 'VM duplicated'|trans }}: ' + result.vmid, 'success');
+                window.location.reload();
+            },
+            onFailure: function(res) {
+                setActionProgress('{{ 'Action failed'|trans }}', '<p class="text-danger mb-0"><strong>{{ 'Duplicate failed after retries.'|trans }}</strong><br>' + escapeHtml((res && res.message) ? res.message : 'Unknown error') + '</p>', true);
+            }
+        });
+    });
+
+    document.querySelector('.btn-delete')?.addEventListener('click', function() {
+        if (!selectedVmid) {
+            return;
+        }
+
+        function pollDeleteTask(taskId) {
+            var attempts = 0;
+            var maxAttempts = 120;
+
+            function checkStatus() {
+                attempts += 1;
+                FOSSBilling.api.client.post('vps/vm_delete_task_status',
+                    { task_id: taskId },
+                    function(status) {
+                        if (status.status === 'completed') {
+                            FOSSBilling.message('{{ 'VM deleted and billing stopped'|trans }}', 'success');
+                            window.location.reload();
+                            return;
+                        }
+                        if (status.status === 'failed') {
+                            FOSSBilling.message((status.error_message || '{{ 'Delete failed'|trans }}'), 'error');
+                            return;
+                        }
+
+                        if (attempts < maxAttempts) {
+                            setTimeout(checkStatus, 5000);
+                        }
+                    },
+                    function() {
+                        if (attempts < maxAttempts) {
+                            setTimeout(checkStatus, 5000);
+                        }
+                    }
+                );
+            }
+
+            setTimeout(checkStatus, 2000);
+        }
+
+        getActionProgressModal().show();
+        setActionProgress('{{ 'Starting VM delete...'|trans }}', '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Submitting request...'|trans }}</span></div>', false);
+        postWithRetry('vps/vm_delete_async',
+            { vmid: selectedVmid },
+            {
+            retries: 5,
+            delayMs: 3000,
+            onRetry: function(attempt, retries) {
+                setActionProgress('{{ 'Starting VM delete...'|trans }}', '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Host busy, retrying...'|trans }} (' + attempt + '/' + retries + ')</span></div>', false);
+            },
+            onSuccess: function(result) {
+                FOSSBilling.message('{{ 'Delete started in background. You can leave this page.'|trans }}', 'success');
+                if (result && result.task_id) {
+                    pollDeleteTask(result.task_id);
+                }
+            },
+            onFailure: function(res) {
+                setActionProgress('{{ 'Action failed'|trans }}', '<p class="text-danger mb-0"><strong>{{ 'Delete request failed after retries.'|trans }}</strong><br>' + escapeHtml((res && res.message) ? res.message : 'Unknown error') + '</p>', true);
+            }
+        });
+    });
+
+    function pollSnapshotTask(taskId, successMessage) {
+        var attempts = 0;
+        var maxAttempts = 180;
+
+        function checkStatus() {
+            attempts += 1;
+            FOSSBilling.api.client.post('vps/vm_snapshot_task_status',
+                { task_id: taskId },
+                function(status) {
+                    if (status.status === 'completed') {
+                        FOSSBilling.message(successMessage, 'success');
+                        window.location.reload();
+                        return;
+                    }
+                    if (status.status === 'failed') {
+                        FOSSBilling.message((status.error_message || '{{ 'Snapshot task failed'|trans }}'), 'error');
+                        return;
+                    }
+
+                    if (attempts < maxAttempts) {
+                        setTimeout(checkStatus, 5000);
+                    }
+                },
+                function() {
+                    if (attempts < maxAttempts) {
+                        setTimeout(checkStatus, 5000);
+                    }
+                }
+            );
+        }
+
+        setTimeout(checkStatus, 2000);
+    }
+
+    document.addEventListener('click', function(event) {
+        var restoreButton = event.target.closest('.vm-snapshot-restore-btn');
+        if (!restoreButton) {
+            return;
+        }
+
+        var vmid = restoreButton.dataset.vmid;
+        var snapshotName = restoreButton.dataset.snapshotName;
+        if (!vmid || !snapshotName) {
+            return;
+        }
+        if (!confirm('{{ 'Restore this snapshot? This will roll the VM back to the selected point in time.'|trans }}')) {
+            return;
+        }
+
+        getActionProgressModal().show();
+        setActionProgress('{{ 'Starting snapshot restore...'|trans }}', '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Submitting request...'|trans }}</span></div>', false);
+        postWithRetry('vps/vm_snapshot_restore_async',
+            { vmid: vmid, snapshot_name: snapshotName },
+            {
+            retries: 5,
+            delayMs: 3000,
+            onRetry: function(attempt, retries) {
+                setActionProgress('{{ 'Starting snapshot restore...'|trans }}', '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Host busy, retrying...'|trans }} (' + attempt + '/' + retries + ')</span></div>', false);
+            },
+            onSuccess: function(result) {
+                FOSSBilling.message('{{ 'Snapshot restore started in background. You can leave this page.'|trans }}', 'success');
+                if (result && result.task_id) {
+                    pollSnapshotTask(result.task_id, '{{ 'Snapshot restored successfully'|trans }}');
+                }
+            },
+            onFailure: function(res) {
+                setActionProgress('{{ 'Action failed'|trans }}', '<p class="text-danger mb-0"><strong>{{ 'Snapshot restore request failed after retries.'|trans }}</strong><br>' + escapeHtml((res && res.message) ? res.message : 'Unknown error') + '</p>', true);
+            }
+        });
+    });
+
+    function formatCurrency(total) {
+        var neg = total < 0;
+        if (neg) {
+            total = Math.abs(total);
+        }
+        return (neg ? "-$" : '$') + parseFloat(total, 10).toFixed(2).replace(/(\d)(?=(\d{3})+\.)/g, "$1,");
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function showVmAccessDetails() {
+        if (!selectedVmid) {
+            return;
+        }
+
+        var body = document.getElementById('vmAccessModalBody');
+        if (!body) {
+            return;
+        }
+
+        body.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Loading access details...'|trans }}</span></div>';
+
+        FOSSBilling.api.client.post('vps/vm_access_details', { vmid: selectedVmid },
+            function(result) {
+                var vmName = result && result.name ? result.name : ('VM #' + selectedVmid);
+                var ipAddress = result && result.ip_address ? result.ip_address : '-';
+                var rootPassword = result && result.root_password ? result.root_password : '';
+                var hasPassword = !!(result && result.has_root_password && rootPassword !== '');
+                var html = '<p class="mb-2"><strong>' + escapeHtml(vmName) + '</strong></p>';
+                html += '<p class="mb-2"><strong>{{ 'IP address'|trans }}:</strong> <code>' + escapeHtml(ipAddress) + '</code></p>';
+
+                if (hasPassword) {
+                    html += '<p class="mb-2"><strong>{{ 'Root password'|trans }}:</strong> <code id="vm-root-password">' + escapeHtml(rootPassword) + '</code></p>';
+                    html += '<button type="button" class="btn btn-sm btn-outline-secondary" id="copy-root-password">{{ 'Copy root password'|trans }}</button>';
+                } else {
+                    html += '<p class="mb-0 text-secondary">{{ 'Root password is not available for this VM.'|trans }}</p>';
+                }
+                body.innerHTML = html;
+
+                var copyButton = document.getElementById('copy-root-password');
+                if (copyButton && hasPassword) {
+                    copyButton.addEventListener('click', function() {
+                        navigator.clipboard.writeText(rootPassword).then(function() {
+                            FOSSBilling.message('{{ 'Root password copied to clipboard.'|trans }}', 'success');
+                        }).catch(function() {
+                            FOSSBilling.message('{{ 'Could not copy password automatically. Please copy it manually.'|trans }}', 'error');
+                        });
+                    });
+                }
+            },
+            function(res) {
+                body.innerHTML = '<p class="text-danger mb-0"><strong>{{ 'Failed to load VM access details.'|trans }}</strong><br>' + escapeHtml((res && res.message) ? res.message : 'Unknown error') + '</p>';
+            }
+        );
+    }
+
+    function showContainerAccessDetails() {
+        if (!selectedCtid) {
+            return;
+        }
+
+        var body = document.getElementById('containerAccessModalBody');
+        if (!body) {
+            return;
+        }
+
+        body.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Loading access details...'|trans }}</span></div>';
+        var modalEl = document.getElementById('containerAccessModal');
+        if (modalEl) {
+            new bootstrap.Modal(modalEl).show();
+        }
+
+        FOSSBilling.api.client.post('vps/container_access_details', { ctid: selectedCtid },
+            function(result) {
+                var ctName = result && result.name ? result.name : ('CT #' + selectedCtid);
+                var ipAddress = result && result.ip_address ? result.ip_address : '-';
+                var rootPassword = result && result.root_password ? result.root_password : '';
+                var hasPassword = !!(result && result.has_root_password && rootPassword !== '');
+                var applicationUrl = (result && result.application_url) ? result.application_url : ((ipAddress && ipAddress !== '-') ? ('http://' + ipAddress) : null);
+                var sshCommand = (result && result.ssh_command) ? result.ssh_command : ((ipAddress && ipAddress !== '-') ? ('ssh root@' + ipAddress) : null);
+                var accessHints = result && result.access_hints ? result.access_hints : null;
+                if (!accessHints && result) {
+                    accessHints = {
+                        likely_web_url: applicationUrl || null,
+                        likely_admin_url: result.admin_url || null,
+                        ssh_command: sshCommand || null,
+                        notes: []
+                    };
+                }
+                var html = '<p class="mb-2"><strong>' + escapeHtml(ctName) + '</strong></p>';
+                html += '<p class="mb-2"><strong>{{ 'IP address'|trans }}:</strong> <code>' + escapeHtml(ipAddress) + '</code></p>';
+                if (result && result.template) {
+                    html += '<p class="mb-2"><strong>{{ 'Template'|trans }}:</strong> <code>' + escapeHtml(result.template) + '</code></p>';
+                }
+                if (accessHints && accessHints.application_name) {
+                    html += '<p class="mb-2"><strong>{{ 'Application'|trans }}:</strong> <code>' + escapeHtml(accessHints.application_name) + '</code></p>';
+                }
+
+                if (hasPassword) {
+                    html += '<p class="mb-2"><strong>{{ 'Root password'|trans }}:</strong> <code id="container-root-password">' + escapeHtml(rootPassword) + '</code></p>';
+                    html += '<button type="button" class="btn btn-sm btn-outline-secondary" id="copy-container-root-password">{{ 'Copy root password'|trans }}</button>';
+                } else {
+                    html += '<p class="mb-0 text-secondary">{{ 'Root password is not available for this container.'|trans }}</p>';
+                }
+                if (accessHints) {
+                    if (applicationUrl || accessHints.likely_web_url) {
+                        var appUrl = applicationUrl || accessHints.likely_web_url;
+                        html += '<hr class="my-2"><p class="mb-1"><strong>{{ 'Application URL'|trans }}:</strong> <a href=\"' + escapeHtml(appUrl) + '\" target=\"_blank\" rel=\"noopener noreferrer\">' + escapeHtml(appUrl) + '</a></p>';
+                    }
+                    if (sshCommand || accessHints.ssh_command) {
+                        var sshCmd = sshCommand || accessHints.ssh_command;
+                        html += '<p class="mb-1"><strong>{{ 'SSH command'|trans }}:</strong> <code id="container-ssh-command">' + escapeHtml(sshCmd) + '</code></p>';
+                        html += '<button type="button" class="btn btn-sm btn-outline-secondary mb-1" id="copy-container-ssh-command">{{ 'Copy SSH command'|trans }}</button>';
+                    }
+                    if (accessHints.likely_admin_url) {
+                        html += '<p class="mb-1"><strong>{{ 'Admin URL'|trans }}:</strong> <a href=\"' + escapeHtml(accessHints.likely_admin_url) + '\" target=\"_blank\" rel=\"noopener noreferrer\">' + escapeHtml(accessHints.likely_admin_url) + '</a></p>';
+                    }
+                    if (accessHints && accessHints.username_hint) {
+                        html += '<p class="mb-1"><small class="text-secondary">' + escapeHtml(accessHints.username_hint) + '</small></p>';
+                    }
+                    if (Array.isArray(accessHints.notes) && accessHints.notes.length > 0) {
+                        html += '<ul class="small text-secondary mb-0">';
+                        accessHints.notes.forEach(function(note) {
+                            html += '<li>' + escapeHtml(note) + '</li>';
+                        });
+                        html += '</ul>';
+                    }
+                }
+                html += '<p class="small text-danger mt-2 mb-0">{{ 'If you have provisioned a VM on the internal network, be sure you are connected to the VPN at %vpn_url%'|trans({'%vpn_url%': 'https://my.' ~ vps_domain ~ ':4443'}) }}</p>';
+                body.innerHTML = html;
+
+                var copyButton = document.getElementById('copy-container-root-password');
+                if (copyButton && hasPassword) {
+                    copyButton.addEventListener('click', function() {
+                        navigator.clipboard.writeText(rootPassword).then(function() {
+                            FOSSBilling.message('{{ 'Root password copied to clipboard.'|trans }}', 'success');
+                        }).catch(function() {
+                            FOSSBilling.message('{{ 'Could not copy password automatically. Please copy it manually.'|trans }}', 'error');
+                        });
+                    });
+                }
+                var sshCopyButton = document.getElementById('copy-container-ssh-command');
+                if (sshCopyButton && (sshCommand || (accessHints && accessHints.ssh_command))) {
+                    sshCopyButton.addEventListener('click', function() {
+                        navigator.clipboard.writeText(sshCommand || accessHints.ssh_command).then(function() {
+                            FOSSBilling.message('{{ 'SSH command copied to clipboard.'|trans }}', 'success');
+                        }).catch(function() {
+                            FOSSBilling.message('{{ 'Could not copy command automatically. Please copy it manually.'|trans }}', 'error');
+                        });
+                    });
+                }
+            },
+            function(res) {
+                body.innerHTML = '<p class="text-danger mb-0"><strong>{{ 'Failed to load container access details.'|trans }}</strong><br>' + escapeHtml((res && res.message) ? res.message : 'Unknown error') + '</p>';
+            }
+        );
+    }
+
+    function renderProvisionQueued(modalBody, modalFooter, taskId) {
+        modalBody.innerHTML =
+            '<p class="text-success mb-2"><strong>{{ 'Provisioning started in the background.'|trans }}</strong></p>' +
+            '<p class="mb-2">{{ 'Task ID'|trans }}: <code>' + escapeHtml(taskId) + '</code></p>' +
+            '<p class="small text-secondary mb-0">{{ 'You can close this page now. Provisioning will continue on the server.'|trans }}</p>';
+        modalFooter.classList.remove('d-none');
+    }
+
+    function monitorProvisionTask(taskId, modalBody, modalFooter) {
+        var attempts = 0;
+        var maxAttempts = 180;
+
+        function pollStatus() {
+            attempts += 1;
+            FOSSBilling.api.client.post('vps/provision_task_status', { task_id: taskId },
+                function(status) {
+                    if (status.status === 'completed') {
+                        var vmid = status.result && status.result.vmid ? status.result.vmid : status.vmid;
+                        var vmName = status.result && status.result.name ? status.result.name : '';
+                        var ipAddress = status.result && status.result.ip_address ? status.result.ip_address : '';
+                        modalBody.innerHTML =
+                            '<p class="text-success mb-2"><strong>{{ 'VM provisioned successfully'|trans }}</strong></p>' +
+                            '<p class="mb-1">{{ 'VM ID'|trans }}: <strong>' + escapeHtml(vmid) + '</strong></p>' +
+                            '<p class="mb-1">{{ 'Name'|trans }}: <strong>' + escapeHtml(vmName || ('VM #' + vmid)) + '</strong></p>' +
+                            '<p class="mb-0">{{ 'IP address'|trans }}: <strong>' + escapeHtml(ipAddress || '-') + '</strong></p>' +
+                            '<p class="small text-secondary mt-2 mb-0">{{ 'Use Access details to view and copy credentials.'|trans }}</p>' +
+                            '<p class="small text-secondary mt-1 mb-0">{{ 'Refreshing VM list...'|trans }}</p>';
+                        modalFooter.classList.remove('d-none');
+                        window.setTimeout(function() {
+                            window.location.reload();
+                        }, 1500);
+                        return;
+                    }
+
+                    if (status.status === 'failed') {
+                        modalBody.innerHTML = '<p class="text-danger mb-0"><strong>{{ 'Provisioning failed'|trans }}</strong><br>' + escapeHtml(status.error_message || 'Unknown error') + '</p>';
+                        modalFooter.classList.remove('d-none');
+                        return;
+                    }
+
+                    if (attempts < maxAttempts) {
+                        setTimeout(pollStatus, 5000);
+                        return;
+                    }
+
+                    modalBody.innerHTML = '<p class="text-warning mb-0"><strong>{{ 'Provisioning is still running in the background.'|trans }}</strong><br>{{ 'You can close this page and check back later.'|trans }}</p>';
+                    modalFooter.classList.remove('d-none');
+                },
+                function() {
+                    if (attempts < maxAttempts) {
+                        setTimeout(pollStatus, 5000);
+                        return;
+                    }
+                    modalBody.innerHTML = '<p class="text-warning mb-0"><strong>{{ 'Provisioning status check failed.'|trans }}</strong><br>{{ 'You can close this page; provisioning may still continue in background.'|trans }}</p>';
+                    modalFooter.classList.remove('d-none');
+                }
+            );
+        }
+
+        modalBody.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Provisioning queued. Monitoring status...'|trans }}</span></div><p class="small text-secondary mt-2 mb-0">{{ 'You can close this page at any time. The task will keep running.'|trans }}</p>';
+        modalFooter.classList.add('d-none');
+        setTimeout(pollStatus, 2500);
+    }
+
+    function renderContainerQueued(modalBody, modalFooter, taskId) {
+        modalBody.innerHTML =
+            '<p class="text-success mb-2"><strong>{{ 'Container provisioning started in the background.'|trans }}</strong></p>' +
+            '<p class="mb-2">{{ 'Task ID'|trans }}: <code>' + escapeHtml(taskId) + '</code></p>' +
+            '<p class="small text-secondary mb-0">{{ 'You can close this page now. Provisioning will continue on the server.'|trans }}</p>';
+        modalFooter.classList.remove('d-none');
+    }
+
+    function monitorContainerTask(taskId, modalBody, modalFooter) {
+        var attempts = 0;
+        var maxAttempts = 180;
+
+        function pollStatus() {
+            attempts += 1;
+            FOSSBilling.api.client.post('vps/container_provision_task_status', { task_id: taskId },
+                function(status) {
+                    if (status.status === 'completed') {
+                        var ctid = status.result && status.result.ctid ? status.result.ctid : status.ctid;
+                        var ctName = status.result && status.result.name ? status.result.name : '';
+                        var ipAddress = status.result && status.result.ip_address ? status.result.ip_address : '';
+                        var rootPassword = status.result && status.result.root_password ? status.result.root_password : '';
+                        var networkMode = status.result && status.result.network_mode ? status.result.network_mode : '';
+                        var applicationUrl = status.result && status.result.application_url ? status.result.application_url : (ipAddress ? ('http://' + ipAddress) : '');
+                        var sshCommand = status.result && status.result.ssh_command ? status.result.ssh_command : (ipAddress ? ('ssh root@' + ipAddress) : '');
+                        var accessHints = status.result && status.result.access_hints ? status.result.access_hints : null;
+                        var hintHtml = '';
+                        if (applicationUrl || (accessHints && accessHints.likely_web_url)) {
+                            var appUrl = applicationUrl || accessHints.likely_web_url;
+                            hintHtml += '<p class="mb-1">{{ 'Application URL'|trans }}: <a href=\"' + escapeHtml(appUrl) + '\" target=\"_blank\" rel=\"noopener noreferrer\">' + escapeHtml(appUrl) + '</a></p>';
+                        }
+                        if (accessHints && accessHints.application_name) {
+                            hintHtml += '<p class="mb-1">{{ 'Application'|trans }}: <strong>' + escapeHtml(accessHints.application_name) + '</strong></p>';
+                        }
+                        if (accessHints && accessHints.likely_admin_url) {
+                            hintHtml += '<p class="mb-1">{{ 'Admin URL'|trans }}: <a href=\"' + escapeHtml(accessHints.likely_admin_url) + '\" target=\"_blank\" rel=\"noopener noreferrer\">' + escapeHtml(accessHints.likely_admin_url) + '</a></p>';
+                        }
+                        if (sshCommand || (accessHints && accessHints.ssh_command)) {
+                            hintHtml += '<p class="mb-1">{{ 'SSH command'|trans }}: <code>' + escapeHtml(sshCommand || accessHints.ssh_command) + '</code></p>';
+                        }
+                        if (accessHints && accessHints.username_hint) {
+                            hintHtml += '<p class="small text-secondary mb-1">' + escapeHtml(accessHints.username_hint) + '</p>';
+                        }
+                        hintHtml += '<p class="small text-danger mb-0">{{ 'If you have provisioned a VM on the internal network, be sure you are connected to the VPN at %vpn_url%'|trans({'%vpn_url%': 'https://my.' ~ vps_domain ~ ':4443'}) }}</p>';
+                        modalBody.innerHTML =
+                            '<p class="text-success mb-2"><strong>{{ 'Container provisioned successfully'|trans }}</strong></p>' +
+                            '<p class="mb-1">{{ 'Container ID'|trans }}: <strong>' + escapeHtml(ctid) + '</strong></p>' +
+                            '<p class="mb-1">{{ 'Name'|trans }}: <strong>' + escapeHtml(ctName || ('CT #' + ctid)) + '</strong></p>' +
+                            '<p class="mb-1">{{ 'IP address'|trans }}: <strong>' + escapeHtml(ipAddress || '-') + '</strong></p>' +
+                            '<p class="mb-1">{{ 'Network mode'|trans }}: <strong>' + escapeHtml(networkMode || '-') + '</strong></p>' +
+                            '<p class="mb-1">{{ 'Root password'|trans }}: <code>' + escapeHtml(rootPassword || '') + '</code></p>' +
+                            hintHtml;
+                        modalFooter.classList.remove('d-none');
+                        return;
+                    }
+
+                    if (status.status === 'failed') {
+                        modalBody.innerHTML = '<p class="text-danger mb-0"><strong>{{ 'Container provisioning failed'|trans }}</strong><br>' + escapeHtml(status.error_message || 'Unknown error') + '</p>';
+                        modalFooter.classList.remove('d-none');
+                        return;
+                    }
+
+                    if (attempts < maxAttempts) {
+                        setTimeout(pollStatus, 5000);
+                        return;
+                    }
+
+                    modalBody.innerHTML = '<p class="text-warning mb-0"><strong>{{ 'Container provisioning is still running in the background.'|trans }}</strong><br>{{ 'You can close this page and check back later.'|trans }}</p>';
+                    modalFooter.classList.remove('d-none');
+                },
+                function() {
+                    if (attempts < maxAttempts) {
+                        setTimeout(pollStatus, 5000);
+                        return;
+                    }
+                    modalBody.innerHTML = '<p class="text-warning mb-0"><strong>{{ 'Container status check failed.'|trans }}</strong><br>{{ 'You can close this page; provisioning may still continue in background.'|trans }}</p>';
+                    modalFooter.classList.remove('d-none');
+                }
+            );
+        }
+
+        modalBody.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Container queued. Monitoring status...'|trans }}</span></div><p class="small text-secondary mt-2 mb-0">{{ 'You can close this page at any time. The task will keep running.'|trans }}</p>';
+        modalFooter.classList.add('d-none');
+        setTimeout(pollStatus, 2500);
+    }
+
+    var vmStorageSlowHourlyRate = {{ storage_slow_hourly_rate|default('0.0002777778')|number_format(8, '.', '')|raw }};
+    var vmStorageFastHourlyRate = {{ storage_fast_hourly_rate|default('0.0006944444')|number_format(8, '.', '')|raw }};
+    var vmCpuHourlyRate = {{ cpu_hourly_rate|default('0.0018055556')|number_format(8, '.', '')|raw }};
+    var vmMemoryHourlyRate = {{ memory_hourly_rate|default('0.0016666667')|number_format(8, '.', '')|raw }};
+    var networkMonthlyRates = {
+        public: {{ ip_public_monthly_rate|default(0)|number_format(2, '.', '')|raw }},
+        internal: {{ ip_internal_monthly_rate|default(0)|number_format(2, '.', '')|raw }},
+        ipv6_only: {{ ip_ipv6_only_monthly_rate|default(0)|number_format(2, '.', '')|raw }}
+    };
+
+    function calculate() {
+        var vmDiskType = document.getElementById('vm_disk_type');
+        var vmDiskSize = document.getElementById('vm_disk_size');
+        var vmCpu = document.getElementById('vm_cpu');
+        var vmMem = document.getElementById('vm_mem');
+        var vmCost = document.getElementById('vm_cost');
+        var vmIpCost = document.getElementById('vm_ip_cost');
+        var vmCostHidden = document.getElementById('vm_cost_hidden');
+        var vmNetworkMode = document.getElementById('vm_network_mode');
+        var provisionButton = document.querySelector('.provision');
+        var eligibilityNote = document.getElementById('provision-eligibility-note');
+        var vmOs = document.getElementById('vm_os');
+        var vmName = document.getElementById('vm_name');
+
+        if (!vmDiskType || !vmDiskSize || !vmCpu || !vmMem || !vmCost || !vmNetworkMode || !provisionButton || !vmOs || !vmName) {
+            return;
+        }
+
+        var diskType = vmDiskType.value;
+        var diskSize = parseFloat(vmDiskSize.value) || 0;
+        var cpu = parseFloat(vmCpu.value) || 0;
+        var mem = parseFloat(vmMem.value) || 0;
+        var networkMode = String(vmNetworkMode.value || 'public');
+        var storageHourlyRate = diskType === 'ssd' ? vmStorageFastHourlyRate : vmStorageSlowHourlyRate;
+        var diskCost = diskSize * storageHourlyRate * 720;
+        var cpuCost = cpu * vmCpuHourlyRate * 720;
+        var memCost = mem * vmMemoryHourlyRate * 720;
+        var ipCost = Number(networkMonthlyRates[networkMode] || 0);
+        var cost = diskCost + cpuCost + memCost + ipCost;
+
+        vmCost.value = formatCurrency(cost);
+        if (vmIpCost) {
+            vmIpCost.value = formatCurrency(ipCost);
+        }
+        if (vmCostHidden) {
+            vmCostHidden.value = cost.toFixed(2);
+        }
+
+        var canPay = billingBypassEnabled || hasActiveSubscription || currentBalance >= cost;
+        if (vmName.value.trim() !== '' && vmOs.value !== '' && canPay) {
+            provisionButton.removeAttribute('disabled');
+        } else {
+            provisionButton.setAttribute('disabled', 'disabled');
+        }
+
+        if (!eligibilityNote) {
+            return;
+        }
+        if (billingBypassEnabled) {
+            eligibilityNote.textContent = '{{ 'Billing checks are bypassed for testing.'|trans }}';
+            eligibilityNote.className = 'small mt-2 mb-0 text-warning';
+            return;
+        }
+        if (hasActiveSubscription) {
+            eligibilityNote.textContent = '{{ 'Active VPS subscription detected. Provisioning is allowed.'|trans }}';
+            eligibilityNote.className = 'small mt-2 mb-0 text-success';
+            return;
+        }
+
+        if (currentBalance >= cost) {
+            eligibilityNote.textContent = '{{ 'Your balance covers at least one month of this VM cost.'|trans }}';
+            eligibilityNote.className = 'small mt-2 mb-0 text-success';
+        } else {
+            eligibilityNote.textContent = '{{ 'Insufficient balance for one month. Add funds or maintain an active VPS subscription.'|trans }}';
+            eligibilityNote.className = 'small mt-2 mb-0 text-danger';
+        }
+    }
+
+    function calculateContainerEligibility() {
+        var ctDiskSize = document.getElementById('ct_disk_size');
+        var ctDiskType = document.getElementById('ct_disk_type');
+        var ctTemplate = document.getElementById('ct_template');
+        var ctName = document.getElementById('ct_name');
+        var ctCost = document.getElementById('ct_cost');
+        var ctIpCost = document.getElementById('ct_ip_cost');
+        var ctNetworkMode = document.getElementById('ct_network_mode');
+        var ctStoragePreview = document.getElementById('ct_storage_preview');
+        var ctProvisionButton = document.querySelector('.container-provision-btn');
+        var eligibilityNote = document.getElementById('container-eligibility-note');
+
+        if (!ctDiskSize || !ctDiskType || !ctTemplate || !ctName || !ctCost || !ctNetworkMode || !ctProvisionButton || !eligibilityNote) {
+            return;
+        }
+
+        var diskSize = parseFloat(ctDiskSize.value) || 10;
+        var diskType = String(ctDiskType.value || 'sata');
+        var networkMode = String(ctNetworkMode.value || 'public');
+        var storage = diskType === 'ssd' ? 'nas2-vm-fast' : 'nas2-vm-slow';
+        var diskMonthlyRate = (diskType === 'ssd' ? vmStorageFastHourlyRate : vmStorageSlowHourlyRate) * 720;
+        var ipCost = Number(networkMonthlyRates[networkMode] || 0);
+        var cost = (diskSize * diskMonthlyRate) + ipCost;
+        ctCost.value = formatCurrency(cost);
+        if (ctIpCost) {
+            ctIpCost.value = formatCurrency(ipCost);
+        }
+        if (ctStoragePreview) {
+            ctStoragePreview.value = storage;
+        }
+
+        var canPay = billingBypassEnabled || hasActiveSubscription || currentBalance >= cost;
+        if (ctName.value.trim() !== '' && ctTemplate.value !== '' && canPay) {
+            ctProvisionButton.removeAttribute('disabled');
+        } else {
+            ctProvisionButton.setAttribute('disabled', 'disabled');
+        }
+
+        if (billingBypassEnabled) {
+            eligibilityNote.textContent = '{{ 'Billing checks are bypassed for testing.'|trans }}';
+            eligibilityNote.className = 'small mb-2 text-warning';
+            return;
+        }
+        if (hasActiveSubscription) {
+            eligibilityNote.textContent = '{{ 'Active VPS subscription detected. Provisioning is allowed.'|trans }}';
+            eligibilityNote.className = 'small mb-2 text-success';
+            return;
+        }
+        if (currentBalance >= cost) {
+            eligibilityNote.textContent = '{{ 'Your balance covers at least one month of this container cost.'|trans }}';
+            eligibilityNote.className = 'small mb-2 text-success';
+        } else {
+            eligibilityNote.textContent = '{{ 'Insufficient balance for one month. Add funds or maintain an active VPS subscription.'|trans }}';
+            eligibilityNote.className = 'small mb-2 text-danger';
+        }
+    }
+
+    ['vm_cpu', 'vm_mem', 'vm_disk_size', 'vm_disk_type', 'vm_network_mode', 'vm_os', 'vm_name'].forEach(function(id) {
+        var input = document.getElementById(id);
+        if (!input) {
+            return;
+        }
+        var eventType = input.tagName.toLowerCase() === 'select' ? 'change' : 'input';
+        input.addEventListener(eventType, calculate);
+    });
+
+    ['ct_disk_size', 'ct_disk_type', 'ct_network_mode', 'ct_template', 'ct_name'].forEach(function(id) {
+        var input = document.getElementById(id);
+        if (!input) {
+            return;
+        }
+        var eventType = input.tagName.toLowerCase() === 'select' ? 'change' : 'input';
+        input.addEventListener(eventType, calculateContainerEligibility);
+    });
+
+    calculate();
+    calculateContainerEligibility();
+    loadFolderState(function() {
+        groupVmRowsByFolder();
+        groupContainerRowsByFolder();
+    });
+
+    var createForm = document.getElementById('create-vm');
+    createForm?.addEventListener('submit', function(event) {
+        event.preventDefault();
+
+        var modalBody = document.getElementById('provisionVmModalBody');
+        var modalFooter = document.getElementById('provisionVmModalFooter');
+        modalBody.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Queueing VM provisioning...'|trans }}</span></div><p class="small text-secondary mt-2 mb-0">{{ 'This request returns quickly. You can close this page once queued.'|trans }}</p>';
+        modalFooter.classList.add('d-none');
+        getProvisionModal().show();
+
+        postWithRetry(
+            'vps/provision_vm',
+            FOSSBilling.tools.serializeFormDataToObject(new FormData(createForm)),
+            {
+            retries: 5,
+            delayMs: 3000,
+            onRetry: function(attempt, retries) {
+                modalBody.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Provisioning request is retrying...'|trans }} (' + attempt + '/' + retries + ')</span></div><p class="small text-secondary mt-2 mb-0">{{ 'Host is busy, retrying automatically.'|trans }}</p>';
+            },
+            onSuccess: function(result) {
+                if (!result || !result.task_id) {
+                    modalBody.innerHTML = '<p class="text-danger mb-0"><strong>{{ 'Provisioning failed'|trans }}</strong><br>{{ 'No task ID returned by the server.'|trans }}</p>';
+                    modalFooter.classList.remove('d-none');
+                    return;
+                }
+
+                renderProvisionQueued(modalBody, modalFooter, result.task_id);
+                monitorProvisionTask(result.task_id, modalBody, modalFooter);
+            },
+            onFailure: function(res) {
+                modalBody.innerHTML = '<p class="text-danger mb-0"><strong>{{ 'Provisioning failed'|trans }}</strong><br>' + (res.message || 'Unknown error') + (res.code ? ' (' + res.code + ')' : '') + '</p>';
+                modalFooter.classList.remove('d-none');
+            }
+        });
+    });
+
+    var createContainerForm = document.getElementById('create-container');
+    createContainerForm?.addEventListener('submit', function(event) {
+        event.preventDefault();
+
+        var modalBody = document.getElementById('provisionContainerModalBody');
+        var modalFooter = document.getElementById('provisionContainerModalFooter');
+        modalBody.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Queueing container provisioning...'|trans }}</span></div><p class="small text-secondary mt-2 mb-0">{{ 'This request returns quickly. You can close this page once queued.'|trans }}</p>';
+        modalFooter.classList.add('d-none');
+        getProvisionContainerModal().show();
+
+        postWithRetry(
+            'vps/container_provision',
+            FOSSBilling.tools.serializeFormDataToObject(new FormData(createContainerForm)),
+            {
+            retries: 5,
+            delayMs: 3000,
+            onRetry: function(attempt, retries) {
+                modalBody.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div><span>{{ 'Container request is retrying...'|trans }} (' + attempt + '/' + retries + ')</span></div><p class="small text-secondary mt-2 mb-0">{{ 'Host is busy, retrying automatically.'|trans }}</p>';
+            },
+            onSuccess: function(result) {
+                if (!result || !result.task_id) {
+                    modalBody.innerHTML = '<p class="text-danger mb-0"><strong>{{ 'Container provisioning failed'|trans }}</strong><br>{{ 'No task ID returned by the server.'|trans }}</p>';
+                    modalFooter.classList.remove('d-none');
+                    return;
+                }
+
+                renderContainerQueued(modalBody, modalFooter, result.task_id);
+                monitorContainerTask(result.task_id, modalBody, modalFooter);
+            },
+            onFailure: function(res) {
+                modalBody.innerHTML = '<p class="text-danger mb-0"><strong>{{ 'Container provisioning failed'|trans }}</strong><br>' + (res.message || 'Unknown error') + (res.code ? ' (' + res.code + ')' : '') + '</p>';
+                modalFooter.classList.remove('d-none');
+            }
+        });
+    });
+});
+</script>
+{% endif %}
+{% endblock %}

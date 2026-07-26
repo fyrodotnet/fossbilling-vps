@@ -25,7 +25,8 @@ require_once __DIR__ . '/Api/vendor/autoload.php';
 
 class Service
 {
-    public const DEFAULT_PROXMOX_HOST = 'node1.domain.com';
+    public const DEFAULT_VPS_DOMAIN = 'domain.com';
+    public const DEFAULT_PROXMOX_HOST = 'node1.' . self::DEFAULT_VPS_DOMAIN;
     public const DEFAULT_PROXMOX_NODE = 'node1';
     public const DEFAULT_PROXMOX_ROOT_USER = 'root';
     public const DEFAULT_PROXMOX_AUTH_REALM = 'pam';
@@ -34,7 +35,10 @@ class Service
     public const VM_ID_START = 1000;
     public const STORAGE_SLOW = 'slow';
     public const STORAGE_FAST = 'fast';
-    private const TEMP_ROOT_PASSWORD = '';
+    public const NETWORK_MODE_PUBLIC = 'public';
+    public const NETWORK_MODE_INTERNAL = 'internal';
+    public const NETWORK_MODE_IPV6_ONLY = 'ipv6_only';
+    private const TEMP_ROOT_PASSWORD = 'temp_root_password';
     private const CLIENT_FOLDER_META_KEY = 'vps_vm_folders';
     private const ROOT_TOKEN_SECRET_META_KEY = 'proxmox_root_token_secret';
     private const ROOT_PASSWORD_META_KEY = 'proxmox_root_password';
@@ -140,6 +144,11 @@ class Service
     public function getModulePermissions(): array
     {
         return [
+            'manage_settings' => [
+                'type' => 'bool',
+                'display_name' => 'Manage settings',
+                'description' => 'Allows the staff member to edit VPS module settings',
+            ],
             'manage_vms' => [
                 'type' => 'bool',
                 'display_name' => 'Manage VPS instances',
@@ -161,6 +170,7 @@ class Service
             `os_slug` varchar(50) DEFAULT NULL,
             `disk_size` int(11) DEFAULT NULL,
             `disk_type` varchar(20) DEFAULT NULL,
+            `network_mode` varchar(20) DEFAULT NULL,
             `monthly_cost` decimal(10,2) DEFAULT NULL,
             `ip_address` varchar(64) DEFAULT NULL,
             `power_state` varchar(20) DEFAULT "unknown",
@@ -231,6 +241,11 @@ class Service
         $fastHourlyRate = max(0.0, (float) ($data['storage_fast_hourly_rate'] ?? ($current['storage_fast_hourly_rate'] ?? 0.0006944444)));
         $cpuHourlyRate = max(0.0, (float) ($data['cpu_hourly_rate'] ?? ($current['cpu_hourly_rate'] ?? 0.0018055556)));
         $memoryHourlyRate = max(0.0, (float) ($data['memory_hourly_rate'] ?? ($current['memory_hourly_rate'] ?? 0.0016666667)));
+        $legacyIpMonthlyRate = max(0.0, (float) ($current['ip_hourly_rate'] ?? 0.0) * 720);
+        $publicIpMonthlyRate = max(0.0, (float) ($data['ip_public_monthly_rate'] ?? ($current['ip_public_monthly_rate'] ?? $legacyIpMonthlyRate)));
+        $internalIpMonthlyRate = max(0.0, (float) ($data['ip_internal_monthly_rate'] ?? ($current['ip_internal_monthly_rate'] ?? $publicIpMonthlyRate)));
+        $ipv6OnlyIpMonthlyRate = max(0.0, (float) ($data['ip_ipv6_only_monthly_rate'] ?? ($current['ip_ipv6_only_monthly_rate'] ?? 0.0)));
+        $legacyIpHourlyRate = $publicIpMonthlyRate / 720;
 
         if ($tokenSecret !== '') {
             $this->storeModuleSecret(self::ROOT_TOKEN_SECRET_META_KEY, $tokenSecret);
@@ -268,6 +283,11 @@ class Service
             'storage_fast_hourly_rate' => number_format($fastHourlyRate, 8, '.', ''),
             'cpu_hourly_rate' => number_format($cpuHourlyRate, 8, '.', ''),
             'memory_hourly_rate' => number_format($memoryHourlyRate, 8, '.', ''),
+            // Keep legacy key for backwards compatibility.
+            'ip_hourly_rate' => number_format($legacyIpHourlyRate, 8, '.', ''),
+            'ip_public_monthly_rate' => number_format($publicIpMonthlyRate, 2, '.', ''),
+            'ip_internal_monthly_rate' => number_format($internalIpMonthlyRate, 2, '.', ''),
+            'ip_ipv6_only_monthly_rate' => number_format($ipv6OnlyIpMonthlyRate, 2, '.', ''),
         ];
 
         $this->di['mod_service']('Extension')->setConfig($configToSave);
@@ -288,6 +308,11 @@ class Service
         $config = $this->getModuleConfig();
 
         return trim((string) ($config['proxmox_node'] ?? self::DEFAULT_PROXMOX_NODE));
+    }
+
+    public function getVpsDomain(): string
+    {
+        return self::DEFAULT_VPS_DOMAIN;
     }
 
     public function getProxmoxAuthRealm(): string
@@ -657,7 +682,13 @@ class Service
     {
         $this->ensureBillingSchema();
         $request = $this->normalizeProvisionRequestData($data);
-        $monthlyCost = $this->calculateMonthlyCost($request['vm_cpu'], $request['vm_mem'], $request['vm_disk_size'], $request['vm_disk_type']);
+        $monthlyCost = $this->calculateMonthlyCost(
+            $request['vm_cpu'],
+            $request['vm_mem'],
+            $request['vm_disk_size'],
+            $request['vm_disk_type'],
+            (string) ($request['network_mode'] ?? self::NETWORK_MODE_PUBLIC)
+        );
         $this->assertProvisionEligibility($client, $monthlyCost, 'provision');
 
         $now = date('Y-m-d H:i:s');
@@ -1477,7 +1508,7 @@ class Service
     {
         $this->ensureBillingSchema();
         $request = $this->normalizeContainerRequestData($data);
-        $monthlyCost = $this->calculateContainerMonthlyCost($request['ct_disk_size'], $request['ct_disk_type']);
+        $monthlyCost = $this->calculateContainerMonthlyCost($request['ct_disk_size'], $request['ct_disk_type'], (string) ($request['network_mode'] ?? self::NETWORK_MODE_PUBLIC));
         $this->assertProvisionEligibility($client, $monthlyCost, 'container provision');
 
         $now = date('Y-m-d H:i:s');
@@ -1660,8 +1691,15 @@ class Service
         $vmMemGb = $request['vm_mem'];
         $diskSize = $request['vm_disk_size'];
         $diskType = $request['vm_disk_type'];
+        $networkMode = (string) ($request['network_mode'] ?? self::NETWORK_MODE_PUBLIC);
 
-        $monthlyCost = $this->calculateMonthlyCost($vmCpu, $vmMemGb, $diskSize, $diskType);
+        $monthlyCost = $this->calculateMonthlyCost(
+            $vmCpu,
+            $vmMemGb,
+            $diskSize,
+            $diskType,
+            $networkMode
+        );
         $this->assertProvisionEligibility($client, $monthlyCost, 'provision');
 
         $templateVmid = $this->resolveTemplateVmid($osSlug, $diskType);
@@ -1691,10 +1729,11 @@ class Service
         $this->waitForTask($proxmox, $node, $upid);
 
         if (!$this->isWindowsTemplate($osSlug)) {
+            $cloudInitIpConfig = $networkMode === self::NETWORK_MODE_IPV6_ONLY ? 'ip=manual,ip6=dhcp' : 'ip=dhcp';
             $proxmox->set("/nodes/$node/qemu/$newVmid/config", [
                 'ciuser' => 'root',
                 'cipassword' => $rootPassword,
-                'ipconfig0' => 'ip=dhcp',
+                'ipconfig0' => $cloudInitIpConfig,
                 'agent' => 1,
                 'cores' => $vmCpu,
                 'memory' => $vmMemGb * 1024,
@@ -1711,6 +1750,10 @@ class Service
                 'memory' => $vmMemGb * 1024,
                 'agent' => 1,
             ]);
+        }
+
+        if ($networkMode === self::NETWORK_MODE_IPV6_ONLY) {
+            $this->configureVmIpv6OnlyNetwork($proxmox, $node, $newVmid);
         }
 
         $this->resizePrimaryDisk($proxmox, $node, $newVmid, $diskSize);
@@ -1732,9 +1775,20 @@ class Service
             $this->enforceRootPasswordWithGuestAgent($proxmox, $node, $newVmid, $rootPassword);
         }
 
-        $ipAddress = $this->waitForVmIpAddress($proxmox, $node, $newVmid, 180);
+        $ipAddress = $this->waitForVmIpAddress(
+            $proxmox,
+            $node,
+            $newVmid,
+            180,
+            $networkMode === self::NETWORK_MODE_IPV6_ONLY
+        );
 
-        if (!$this->isWindowsTemplate($osSlug) && $ipAddress !== null && $rootPassword !== '') {
+        if (
+            !$this->isWindowsTemplate($osSlug)
+            && $networkMode !== self::NETWORK_MODE_IPV6_ONLY
+            && $ipAddress !== null
+            && $rootPassword !== ''
+        ) {
             $this->enforceRootPasswordViaTemporarySsh($ipAddress, $rootPassword, $newVmid);
         }
 
@@ -1748,6 +1802,7 @@ class Service
         $record->os_slug = $osSlug;
         $record->disk_size = $diskSize;
         $record->disk_type = $diskType;
+        $record->network_mode = (string) ($request['network_mode'] ?? self::NETWORK_MODE_PUBLIC);
         $record->monthly_cost = $monthlyCost;
         $record->ip_address = $ipAddress;
         $record->power_state = 'running';
@@ -2724,14 +2779,19 @@ class Service
         }
 
         $newPassword = $this->generatePassword(16);
+        $networkMode = $this->normalizeNetworkMode((string) ($record->network_mode ?? self::NETWORK_MODE_PUBLIC));
+        $cloudInitIpConfig = $networkMode === self::NETWORK_MODE_IPV6_ONLY ? 'ip=manual,ip6=dhcp' : 'ip=dhcp';
         $proxmox = $this->getRootProxmox();
         $node = $this->getVmNode($proxmox, $vmid);
         $proxmox->set("/nodes/$node/qemu/$vmid/config", [
             'ciuser' => 'root',
             'cipassword' => $newPassword,
-            'ipconfig0' => 'ip=dhcp',
+            'ipconfig0' => $cloudInitIpConfig,
             'agent' => 1,
         ]);
+        if ($networkMode === self::NETWORK_MODE_IPV6_ONLY) {
+            $this->configureVmIpv6OnlyNetwork($proxmox, $node, $vmid);
+        }
         try {
             $proxmox->create("/nodes/$node/qemu/$vmid/cloudinit", []);
         } catch (\Throwable) {
@@ -2750,8 +2810,8 @@ class Service
 
         $this->waitForGuestAgentReady($proxmox, $node, $vmid, 180);
         $this->enforceRootPasswordWithGuestAgent($proxmox, $node, $vmid, $newPassword);
-        $ipAddress = $this->waitForVmIpAddress($proxmox, $node, $vmid, 180);
-        if ($ipAddress !== null) {
+        $ipAddress = $this->waitForVmIpAddress($proxmox, $node, $vmid, 180, $networkMode === self::NETWORK_MODE_IPV6_ONLY);
+        if ($ipAddress !== null && $networkMode !== self::NETWORK_MODE_IPV6_ONLY) {
             $this->enforceRootPasswordViaTemporarySsh($ipAddress, $newPassword, $vmid);
         }
 
@@ -3242,11 +3302,11 @@ class Service
         return str_starts_with($osSlug, 'win');
     }
 
-    private function waitForVmIpAddress(Proxmox $proxmox, string $node, int $vmid, int $timeoutSeconds = 60): ?string
+    private function waitForVmIpAddress(Proxmox $proxmox, string $node, int $vmid, int $timeoutSeconds = 60, bool $preferIpv6 = false): ?string
     {
         $start = time();
         while (time() - $start < $timeoutSeconds) {
-            $ip = $this->getVmIpAddress($proxmox, $node, $vmid);
+            $ip = $this->getVmIpAddress($proxmox, $node, $vmid, $preferIpv6);
             if ($ip !== null) {
                 return $ip;
             }
@@ -3256,16 +3316,55 @@ class Service
         return null;
     }
 
-    private function getVmIpAddress(Proxmox $proxmox, string $node, int $vmid): ?string
+    private function getVmIpAddress(Proxmox $proxmox, string $node, int $vmid, bool $preferIpv6 = false): ?string
     {
         try {
             $response = $proxmox->get("/nodes/$node/qemu/$vmid/agent/network-get-interfaces");
+            $interfaces = $response['data']['result'] ?? [];
+            if ($preferIpv6) {
+                $ipv6 = $this->extractPrimaryIpv6(is_array($interfaces) ? $interfaces : []);
+                if ($ipv6 !== null) {
+                    return $ipv6;
+                }
+            }
 
-            return $this->extractPrimaryIpv4($response['data']['result'] ?? []);
+            return $this->extractPrimaryIpv4(is_array($interfaces) ? $interfaces : []);
         } catch (\Throwable) {
             // Guest agent may not be ready yet (or not installed).
             return null;
         }
+    }
+
+    private function extractPrimaryIpv6(array $interfaces): ?string
+    {
+        foreach ($interfaces as $interface) {
+            if (!is_array($interface)) {
+                continue;
+            }
+            $name = (string) ($interface['name'] ?? '');
+            if ($name === 'lo') {
+                continue;
+            }
+
+            foreach (($interface['ip-addresses'] ?? []) as $ipInfo) {
+                if (!is_array($ipInfo)) {
+                    continue;
+                }
+                $ip = $this->sanitizeIpv6Address((string) (
+                    $ipInfo['ip-address']
+                    ?? $ipInfo['address']
+                    ?? $ipInfo['local']
+                    ?? $ipInfo['ip']
+                    ?? ''
+                ));
+                $type = strtolower((string) ($ipInfo['ip-address-type'] ?? ''));
+                if ($type === 'ipv6' && $ip !== null) {
+                    return $ip;
+                }
+            }
+        }
+
+        return null;
     }
 
     private function getContainerIpAddress(Proxmox $proxmox, string $node, int $ctid): ?string
@@ -3388,6 +3487,26 @@ class Service
         return $value;
     }
 
+    private function sanitizeIpv6Address(string $rawValue): ?string
+    {
+        $value = trim($rawValue);
+        if ($value === '') {
+            return null;
+        }
+
+        if (str_contains($value, '/')) {
+            $value = (string) strstr($value, '/', true);
+        }
+        if (!filter_var($value, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            return null;
+        }
+        if ($value === '::1' || str_starts_with(strtolower($value), 'fe80:')) {
+            return null;
+        }
+
+        return $value;
+    }
+
     private function waitForContainerIpAddress(Proxmox $proxmox, string $node, int $ctid, int $timeoutSeconds = 120): ?string
     {
         $start = time();
@@ -3466,14 +3585,15 @@ class Service
         return bin2hex(random_bytes((int) ceil($length / 2)));
     }
 
-    private function calculateMonthlyCost(int $vmCpu, int $vmMemGb, int $diskSizeGb, string $diskType): float
+    private function calculateMonthlyCost(int $vmCpu, int $vmMemGb, int $diskSizeGb, string $diskType, string $networkMode = self::NETWORK_MODE_PUBLIC): float
     {
         $diskRate = $this->getStorageMonthlyRate($diskType);
         $diskCost = $diskSizeGb * $diskRate;
         $cpuCost = $vmCpu * $this->getCpuHourlyRate() * 720;
         $memCost = $vmMemGb * $this->getMemoryHourlyRate() * 720;
+        $ipCost = $this->getIpHourlyRate($networkMode) * 720;
 
-        return round($diskCost + $cpuCost + $memCost, 2);
+        return round($diskCost + $cpuCost + $memCost + $ipCost, 2);
     }
 
     private function runHourlyUsageMetering(): array
@@ -3620,7 +3740,7 @@ class Service
     private function runContainerHourlyUsageMetering(?string $periodHour = null): array
     {
         $rows = $this->di['db']->getAll(
-            'SELECT id, client_id, order_id, ctid, storage, disk_size, disk_type, monthly_cost, power_state
+            'SELECT id, client_id, order_id, ctid, storage, disk_size, disk_type, network_mode, monthly_cost, power_state
              FROM mod_vps_container'
         );
         if ($rows === []) {
@@ -3683,7 +3803,11 @@ class Service
             }
             $monthlyCost = (float) ($row['monthly_cost'] ?? 0);
             if ($monthlyCost <= 0) {
-                $monthlyCost = $this->calculateContainerMonthlyCost(max(1, $diskSize), $diskType);
+                $monthlyCost = $this->calculateContainerMonthlyCost(
+                    max(1, $diskSize),
+                    $diskType,
+                    (string) ($row['network_mode'] ?? self::NETWORK_MODE_PUBLIC)
+                );
                 $this->di['db']->exec(
                     'UPDATE mod_vps_container
                      SET disk_size = :disk_size, disk_type = :disk_type, monthly_cost = :monthly_cost, updated_at = :updated_at
@@ -4094,6 +4218,47 @@ class Service
         return strtolower($diskType) === 'ssd' ? self::STORAGE_FAST : self::STORAGE_SLOW;
     }
 
+    private function configureVmIpv6OnlyNetwork(Proxmox $proxmox, string $node, int $vmid): void
+    {
+        try {
+            $configResponse = $proxmox->get("/nodes/$node/qemu/$vmid/config");
+        } catch (\Throwable) {
+            $configResponse = [];
+        }
+
+        $existingNet0 = (string) (($configResponse['data']['net0'] ?? ''));
+        $net0 = $this->buildIpv6OnlyVmNet0($existingNet0);
+
+        $proxmox->set("/nodes/$node/qemu/$vmid/config", [
+            'net0' => $net0,
+            'ipconfig0' => 'ip=manual,ip6=dhcp',
+        ]);
+    }
+
+    private function buildIpv6OnlyVmNet0(string $existingNet0): string
+    {
+        $parts = array_filter(array_map('trim', explode(',', $existingNet0)), static fn ($part): bool => $part !== '');
+        $filtered = [];
+        foreach ($parts as $part) {
+            if (str_starts_with($part, 'bridge=')
+                || str_starts_with($part, 'tag=')
+                || str_starts_with($part, 'ip=')
+                || str_starts_with($part, 'ip6=')
+            ) {
+                continue;
+            }
+            $filtered[] = $part;
+        }
+
+        if ($filtered === []) {
+            $filtered[] = 'virtio';
+        }
+        $filtered[] = 'bridge=vmbr0';
+        $filtered[] = 'tag=99';
+
+        return implode(',', $filtered);
+    }
+
     private function resolveTemplateVmid(string $osSlug, string $diskType): int
     {
         $templateMap = $this->getTemplateMap($diskType);
@@ -4112,6 +4277,7 @@ class Service
         $vmMemGb = (int) ($data['vm_mem'] ?? 4);
         $diskSize = (int) ($data['vm_disk_size'] ?? 10);
         $diskType = (string) ($data['vm_disk_type'] ?? 'sata');
+        $networkMode = $this->normalizeNetworkMode((string) ($data['network_mode'] ?? self::NETWORK_MODE_PUBLIC));
 
         if ($vmName === '') {
             throw new InformationException('VM name is required', [], 400);
@@ -4140,6 +4306,7 @@ class Service
             'vm_mem' => $vmMemGb,
             'vm_disk_size' => $diskSize,
             'vm_disk_type' => strtolower($diskType),
+            'network_mode' => $networkMode,
         ];
     }
 
@@ -4149,7 +4316,7 @@ class Service
         $template = trim((string) ($data['template'] ?? ''));
         $diskSize = (int) ($data['ct_disk_size'] ?? 10);
         $diskType = strtolower(trim((string) ($data['ct_disk_type'] ?? 'sata')));
-        $networkMode = strtolower(trim((string) ($data['network_mode'] ?? 'public')));
+        $networkMode = $this->normalizeNetworkMode((string) ($data['network_mode'] ?? self::NETWORK_MODE_PUBLIC));
 
         if ($name === '') {
             throw new InformationException('Container name is required', [], 400);
@@ -4163,10 +4330,6 @@ class Service
         if (!in_array($diskType, ['sata', 'ssd'], true)) {
             throw new InformationException('Invalid container disk type selected', [], 400);
         }
-        if (!in_array($networkMode, ['public', 'private'], true)) {
-            throw new InformationException('Invalid container network mode selected', [], 400);
-        }
-
         return [
             'ct_name' => $name,
             'template' => $template,
@@ -4180,7 +4343,7 @@ class Service
     {
         $clientId = (int) $client->id;
         $request = $this->normalizeContainerRequestData($data);
-        $monthlyCost = $this->calculateContainerMonthlyCost($request['ct_disk_size'], $request['ct_disk_type']);
+        $monthlyCost = $this->calculateContainerMonthlyCost($request['ct_disk_size'], $request['ct_disk_type'], (string) ($request['network_mode'] ?? self::NETWORK_MODE_PUBLIC));
         $this->assertProvisionEligibility($client, $monthlyCost, 'container provision');
 
         $this->ensureProxmoxUser($clientId);
@@ -4190,9 +4353,10 @@ class Service
         $rootPassword = $this->generatePassword(16);
         $storage = $this->resolveStorageForDiskType($request['ct_disk_type']);
         $networkMode = $request['network_mode'];
-        $bridge = $networkMode === 'private' ? 'intbr0' : 'vmbr0';
-        $tag = $networkMode === 'private' ? 200 : 100;
-        $networkConfig = sprintf('name=eth0,bridge=%s,tag=%d,ip=dhcp,ip6=dhcp', $bridge, $tag);
+        $bridge = $networkMode === self::NETWORK_MODE_INTERNAL ? 'intbr0' : 'vmbr0';
+        $tag = $networkMode === self::NETWORK_MODE_INTERNAL ? 200 : ($networkMode === self::NETWORK_MODE_IPV6_ONLY ? 110 : 100);
+        $ipv4Mode = $networkMode === self::NETWORK_MODE_IPV6_ONLY ? 'manual' : 'dhcp';
+        $networkConfig = sprintf('name=eth0,bridge=%s,tag=%d,ip=%s,ip6=dhcp', $bridge, $tag, $ipv4Mode);
         $hostname = preg_replace('/[^a-zA-Z0-9.-]/', '-', strtolower($request['ct_name']));
         $hostname = trim((string) $hostname, '-.');
         if ($hostname === '') {
@@ -4274,7 +4438,8 @@ class Service
         $usernameHint = null;
         $notes = [];
 
-        $isLaravel = str_contains($slug, 'laravel');
+        $applicationName = $this->detectContainerApplicationName($slug);
+        $isLaravel = $applicationName === 'Laravel';
         $looksWebTemplate = preg_match('/(laravel|wordpress|nextcloud|drupal|joomla|gitlab|gitea|mattermost|mediawiki|prestashop)/i', $slug) === 1;
         if (!empty($ipAddress)) {
             $likelyWebUrl = 'http://' . $ipAddress;
@@ -4282,9 +4447,9 @@ class Service
         } else {
             $notes[] = 'IP address is still being detected via DHCP. Refresh Access details in a moment.';
         }
-        if (str_contains($slug, 'wordpress')) {
+        if ($applicationName === 'WordPress') {
             $likelyAdminPath = '/wp-admin';
-        } elseif (str_contains($slug, 'nextcloud')) {
+        } elseif ($applicationName === 'Nextcloud') {
             $likelyAdminPath = '/login';
         }
         if ($isLaravel && !empty($ipAddress)) {
@@ -4311,6 +4476,7 @@ class Service
         return [
             'template_label' => $templateLabel,
             'template_slug' => $slug,
+            'application_name' => $applicationName,
             'likely_web_url' => $likelyWebUrl,
             'likely_admin_path' => $likelyAdminPath,
             'likely_admin_url' => $likelyAdminUrl,
@@ -4320,12 +4486,50 @@ class Service
         ];
     }
 
-    private function calculateContainerMonthlyCost(int $diskSizeGb, string $diskType): float
+    private function detectContainerApplicationName(string $templateLabel): ?string
+    {
+        $source = strtolower(trim($templateLabel));
+        if ($source === '') {
+            return null;
+        }
+
+        $knownApps = [
+            'wordpress' => 'WordPress',
+            'nextcloud' => 'Nextcloud',
+            'drupal' => 'Drupal',
+            'joomla' => 'Joomla',
+            'gitlab' => 'GitLab',
+            'gitea' => 'Gitea',
+            'mattermost' => 'Mattermost',
+            'mediawiki' => 'MediaWiki',
+            'prestashop' => 'PrestaShop',
+            'laravel' => 'Laravel',
+        ];
+
+        $matches = [];
+        foreach ($knownApps as $needle => $name) {
+            $pos = strpos($source, $needle);
+            if ($pos !== false) {
+                $matches[$pos] = $name;
+            }
+        }
+
+        if ($matches === []) {
+            return null;
+        }
+
+        ksort($matches);
+
+        return reset($matches);
+    }
+
+    private function calculateContainerMonthlyCost(int $diskSizeGb, string $diskType, string $networkMode = self::NETWORK_MODE_PUBLIC): float
     {
         $safeSize = max(10, min(1000, $diskSizeGb));
         $diskRate = $this->getStorageMonthlyRate($diskType);
+        $networkCost = $this->getNetworkIpMonthlyRate($networkMode);
 
-        return round($safeSize * $diskRate, 2);
+        return round(($safeSize * $diskRate) + $networkCost, 2);
     }
 
     private function getStorageMonthlyRate(string $diskType): float
@@ -4357,6 +4561,64 @@ class Service
         $configuredRate = (float) ($config['memory_hourly_rate'] ?? 0.0016666667);
 
         return max(0.0, $configuredRate);
+    }
+
+    private function normalizeNetworkMode(string $networkMode): string
+    {
+        $value = strtolower(trim($networkMode));
+        if (in_array($value, ['private', 'internal_network', 'internal-only', 'internal'], true)) {
+            return self::NETWORK_MODE_INTERNAL;
+        }
+        if (in_array($value, ['ipv6', 'ipv6-only', 'ipv6_only'], true)) {
+            return self::NETWORK_MODE_IPV6_ONLY;
+        }
+        if (in_array($value, ['public', 'publicly', 'publicly_accessible', 'publically_accessible'], true)) {
+            return self::NETWORK_MODE_PUBLIC;
+        }
+
+        return self::NETWORK_MODE_PUBLIC;
+    }
+
+    private function getNetworkIpMonthlyRate(string $networkMode = self::NETWORK_MODE_PUBLIC): float
+    {
+        $config = $this->getModuleConfig();
+        $normalizedMode = $this->normalizeNetworkMode($networkMode);
+        $legacyDefault = max(0.0, (float) ($config['ip_hourly_rate'] ?? 0.0) * 720);
+
+        $key = match ($normalizedMode) {
+            self::NETWORK_MODE_INTERNAL => 'ip_internal_monthly_rate',
+            self::NETWORK_MODE_IPV6_ONLY => 'ip_ipv6_only_monthly_rate',
+            default => 'ip_public_monthly_rate',
+        };
+        if (array_key_exists($key, $config)) {
+            return max(0.0, (float) $config[$key]);
+        }
+
+        // Fallback for instances configured before network-specific pricing existed.
+        if ($normalizedMode === self::NETWORK_MODE_INTERNAL && array_key_exists('ip_public_monthly_rate', $config)) {
+            return max(0.0, (float) $config['ip_public_monthly_rate']);
+        }
+
+        return $legacyDefault;
+    }
+
+    public function getIpHourlyRate(string $networkMode = self::NETWORK_MODE_PUBLIC): float
+    {
+        return round($this->getNetworkIpMonthlyRate($networkMode) / 720, 8);
+    }
+
+    public function getPricingRates(): array
+    {
+        return [
+            'storage_slow_hourly_rate' => $this->getStorageHourlyRate('sata'),
+            'storage_fast_hourly_rate' => $this->getStorageHourlyRate('ssd'),
+            'cpu_hourly_rate' => $this->getCpuHourlyRate(),
+            'memory_hourly_rate' => $this->getMemoryHourlyRate(),
+            'ip_hourly_rate' => $this->getIpHourlyRate(),
+            'ip_public_monthly_rate' => $this->getNetworkIpMonthlyRate(self::NETWORK_MODE_PUBLIC),
+            'ip_internal_monthly_rate' => $this->getNetworkIpMonthlyRate(self::NETWORK_MODE_INTERNAL),
+            'ip_ipv6_only_monthly_rate' => $this->getNetworkIpMonthlyRate(self::NETWORK_MODE_IPV6_ONLY),
+        ];
     }
 
     private function dispatchProvisionTask(int $taskId, string $workerToken): void
@@ -4653,6 +4915,16 @@ class Service
         );
         if ($ipColumn === 0) {
             $this->di['db']->exec('ALTER TABLE mod_vps_vm ADD COLUMN ip_address varchar(64) DEFAULT NULL AFTER monthly_cost');
+        }
+
+        $networkModeColumn = (int) $this->di['db']->getCell(
+            "SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'mod_vps_vm'
+               AND COLUMN_NAME = 'network_mode'"
+        );
+        if ($networkModeColumn === 0) {
+            $this->di['db']->exec('ALTER TABLE mod_vps_vm ADD COLUMN network_mode varchar(20) DEFAULT NULL AFTER disk_type');
         }
 
         $powerStateColumn = (int) $this->di['db']->getCell(

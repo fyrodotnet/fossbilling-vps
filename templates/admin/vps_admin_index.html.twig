@@ -1,0 +1,451 @@
+{% extends request.ajax ? "layout_blank.html.twig" : "layout_default.html.twig" %}
+
+{% block meta_title %}{{ 'VPS'|trans }}{% endblock %}
+
+{% block content %}
+{% set params = admin.extension_config_get({ 'ext': 'mod_vps' }) %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">{{ 'VPS Module'|trans }}</h3>
+    </div>
+    <div class="card-body">
+        <p>{{ 'All provisioned virtual machines, their assigned accounts, and monthly cost.'|trans }}</p>
+
+        <div class="card mb-4">
+            <div class="card-header">
+                <h4 class="card-title mb-0">{{ 'Proxmox Connection Settings'|trans }}</h4>
+            </div>
+            <div class="card-body">
+                <p class="text-secondary">{{ 'Use token credentials when possible. Password is kept only as fallback for VNC ticket requests.'|trans }}</p>
+                <form id="proxmox-settings-form" method="post" action="{{ 'vps/save_settings'|api_url }}" {{ fb_api_form({message: 'Configuration Updated'|trans}) }}>
+                    <input type="hidden" name="CSRFToken" value="{{ CSRFToken }}"/>
+                    <input type="hidden" name="ext" value="mod_vps"/>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">{{ 'Proxmox host'|trans }}</label>
+                            <input class="form-control" type="text" name="proxmox_host" value="{{ params.proxmox_host|default('pm2.' ~ vps_domain) }}" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">{{ 'Proxmox node'|trans }}</label>
+                            <input class="form-control" type="text" name="proxmox_node" value="{{ params.proxmox_node|default('pm2') }}" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ 'Auth realm'|trans }}</label>
+                            <input class="form-control" type="text" name="proxmox_auth_realm" value="{{ params.proxmox_auth_realm|default('pam') }}" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ 'Client realm'|trans }}</label>
+                            <input class="form-control" type="text" name="proxmox_client_realm" value="{{ params.proxmox_client_realm|default('pve') }}" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ 'Root user'|trans }}</label>
+                            <input class="form-control" type="text" name="proxmox_root_user" value="{{ params.proxmox_root_user|default('root') }}" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">{{ 'Root token ID'|trans }}</label>
+                            <input class="form-control" type="text" name="proxmox_root_token_id" value="{{ params.proxmox_root_token_id|default('') }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">{{ 'Root token secret'|trans }}</label>
+                            <input class="form-control" type="password" name="proxmox_root_token_secret" value="" autocomplete="new-password" placeholder="{{ 'Leave blank to keep unchanged'|trans }}">
+                        </div>
+                        <div class="col-md-12">
+                            <label class="form-label">{{ 'Root password (fallback for legacy operations)'|trans }}</label>
+                            <input class="form-control" type="password" name="proxmox_root_password" value="" autocomplete="new-password" placeholder="{{ 'Leave blank to keep unchanged'|trans }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">{{ 'Slow storage hourly rate (per GB)'|trans }}</label>
+                            <input class="form-control" type="number" name="storage_slow_hourly_rate" min="0" step="any" value="{{ params.storage_slow_hourly_rate|default('0.0002777778') }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">{{ 'Fast storage hourly rate (per GB)'|trans }}</label>
+                            <input class="form-control" type="number" name="storage_fast_hourly_rate" min="0" step="any" value="{{ params.storage_fast_hourly_rate|default('0.0006944444') }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">{{ 'CPU hourly rate (per vCPU)'|trans }}</label>
+                            <input class="form-control" type="number" name="cpu_hourly_rate" min="0" step="any" value="{{ params.cpu_hourly_rate|default('0.0018055556') }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">{{ 'Memory hourly rate (per GB)'|trans }}</label>
+                            <input class="form-control" type="number" name="memory_hourly_rate" min="0" step="any" value="{{ params.memory_hourly_rate|default('0.0016666667') }}">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ 'Public network monthly IP rate'|trans }}</label>
+                            <input class="form-control" type="number" name="ip_public_monthly_rate" min="0" step="0.01" value="{{ params.ip_public_monthly_rate|default((params.ip_hourly_rate|default(0) * 720)|number_format(2, '.', '')) }}">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ 'Internal network monthly IP rate'|trans }}</label>
+                            <input class="form-control" type="number" name="ip_internal_monthly_rate" min="0" step="0.01" value="{{ params.ip_internal_monthly_rate|default(params.ip_public_monthly_rate|default((params.ip_hourly_rate|default(0) * 720)|number_format(2, '.', ''))) }}">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ 'IPv6-only monthly IP rate'|trans }}</label>
+                            <input class="form-control" type="number" name="ip_ipv6_only_monthly_rate" min="0" step="0.01" value="{{ params.ip_ipv6_only_monthly_rate|default('0.00') }}">
+                        </div>
+                        <div class="col-md-12">
+                            <p class="text-secondary mb-0">{{ 'Storage, CPU, and memory still use hourly rates. IP rates are entered as monthly amounts per network mode and converted automatically for hourly billing.'|trans }}</p>
+                        </div>
+                        <div class="col-md-12">
+                            <label class="form-check">
+                                <input class="form-check-input" type="checkbox" name="provision_billing_bypass" value="1" {% if params.provision_billing_bypass|default(false) %}checked{% endif %}>
+                                <span class="form-check-label">{{ 'Bypass provisioning billing checks (testing only)'|trans }}</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="mt-3">
+                        <button type="submit" class="btn btn-primary">{{ 'Save settings'|trans }}</button>
+                        <button type="button" class="btn btn-outline-info ms-2" id="preview-proxmox-auth-btn">{{ 'Auth Preview'|trans }}</button>
+                        <button type="button" class="btn btn-outline-secondary ms-2" id="verify-proxmox-btn">{{ 'Verify'|trans }}</button>
+                    </div>
+                </form>
+                <div class="mt-3 d-none" id="proxmox-auth-preview"></div>
+                <div class="mt-3 d-none" id="verify-proxmox-result"></div>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="card-title mb-0">{{ 'VPS Billing Report'|trans }}</h4>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-outline-success btn-sm" id="run-billing-now-btn">{{ 'Run billing now'|trans }}</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" id="refresh-billing-report-btn">{{ 'Refresh report'|trans }}</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <p class="text-secondary mb-3">{{ 'Shows uninvoiced usage totals, rows missing order linkage, and recently generated usage invoices.'|trans }}</p>
+                <div id="billing-run-result" class="d-none mb-3"></div>
+                <div id="billing-report-result" class="d-none"></div>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>{{ 'VM ID'|trans }}</th>
+                        <th>{{ 'Name'|trans }}</th>
+                        <th>{{ 'Client'|trans }}</th>
+                        <th>{{ 'Email'|trans }}</th>
+                        <th>{{ 'OS'|trans }}</th>
+                        <th>{{ 'Disk'|trans }}</th>
+                        <th>{{ 'Monthly Cost'|trans }}</th>
+                        <th>{{ 'Created'|trans }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for vm in vms %}
+                        <tr>
+                            <td>{{ vm.vmid }}</td>
+                            <td>{{ vm.vm_name }}</td>
+                            <td>
+                                {% if vm.client_id %}
+                                    <a href="{{ ('client/manage/' ~ vm.client_id)|url }}">{{ vm.client_name ?: vm.client_id }}</a>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                            <td>{{ vm.client_email ?: '-' }}</td>
+                            <td>{{ vm.os_slug }}</td>
+                            <td>{{ vm.disk_size }} GB ({{ vm.disk_type }})</td>
+                            <td>${{ vm.monthly_cost|number_format(2, '.', ',') }}</td>
+                            <td>{{ vm.created_at }}</td>
+                        </tr>
+                    {% else %}
+                        <tr>
+                            <td colspan="8" class="text-secondary">{{ 'No VPS instances have been provisioned yet.'|trans }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<script type="text/javascript">
+document.addEventListener('DOMContentLoaded', function() {
+    var verifyButton = document.getElementById('verify-proxmox-btn');
+    var verifyResult = document.getElementById('verify-proxmox-result');
+    var previewButton = document.getElementById('preview-proxmox-auth-btn');
+    var previewResult = document.getElementById('proxmox-auth-preview');
+    var settingsForm = document.getElementById('proxmox-settings-form');
+    var billingButton = document.getElementById('refresh-billing-report-btn');
+    var runBillingButton = document.getElementById('run-billing-now-btn');
+    var billingRunResult = document.getElementById('billing-run-result');
+    var billingResult = document.getElementById('billing-report-result');
+    var hasStoredTokenSecret = false;
+    var hasStoredPassword = false;
+
+    if (!verifyButton || !verifyResult || !previewButton || !previewResult || !settingsForm || !billingButton || !runBillingButton || !billingRunResult || !billingResult) {
+        return;
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function renderPreview(preview) {
+        var warnings = Array.isArray(preview.warnings) ? preview.warnings : [];
+        var warningHtml = warnings.length
+            ? '<ul class="mb-0 mt-2">' + warnings.map(function(w) { return '<li>' + escapeHtml(w) + '</li>'; }).join('') + '</ul>'
+            : '';
+        var method = preview.method || 'none';
+        hasStoredTokenSecret = !!preview.has_token_secret;
+        hasStoredPassword = !!preview.has_password;
+        previewResult.classList.remove('d-none');
+        previewResult.className = preview.valid ? 'mt-3 alert alert-success' : 'mt-3 alert alert-warning';
+        previewResult.innerHTML =
+            '<p class="mb-1"><strong>{{ 'Method'|trans }}:</strong> ' + escapeHtml(method.toUpperCase()) + '</p>' +
+            '<p class="mb-1"><strong>{{ 'Identity'|trans }}:</strong> ' + escapeHtml(preview.identity || '') + '</p>' +
+            '<p class="mb-1"><strong>{{ 'Host/Node'|trans }}:</strong> ' + escapeHtml((preview.host || '') + ' / ' + (preview.node || '')) + '</p>' +
+            '<p class="mb-1"><strong>{{ 'Token ID'|trans }}:</strong> ' + escapeHtml(preview.token_id || '-') + '</p>' +
+            '<p class="mb-0"><strong>{{ 'Password configured'|trans }}:</strong> ' + (preview.has_password ? 'yes' : 'no') + '</p>' +
+            warningHtml;
+    }
+
+    function renderSimpleTable(title, columns, rows, emptyMessage) {
+        var thead = '<thead><tr>' + columns.map(function(col) {
+            return '<th>' + escapeHtml(col.label) + '</th>';
+        }).join('') + '</tr></thead>';
+
+        var tbody = '';
+        if (!rows || !rows.length) {
+            tbody = '<tbody><tr><td colspan="' + columns.length + '" class="text-secondary">' + escapeHtml(emptyMessage) + '</td></tr></tbody>';
+        } else {
+            tbody = '<tbody>' + rows.map(function(row) {
+                return '<tr>' + columns.map(function(col) {
+                    var value = row[col.key];
+                    if (value === null || value === undefined || value === '') {
+                        value = '-';
+                    }
+                    return '<td>' + escapeHtml(String(value)) + '</td>';
+                }).join('') + '</tr>';
+            }).join('') + '</tbody>';
+        }
+
+        return '<h5 class="mt-3 mb-2">' + escapeHtml(title) + '</h5><div class="table-responsive"><table class="table table-sm table-bordered">' + thead + tbody + '</table></div>';
+    }
+
+    function renderBillingReport(report) {
+        var runs = Array.isArray(report.recent_runs) ? report.recent_runs : [];
+        var runRows = runs.map(function(run) {
+            return {
+                run_at: run.run_at || '',
+                metered_rows: run.metered_rows || 0,
+                inserted_rows: run.inserted_rows || 0,
+                updated_rows: run.updated_rows || 0,
+                missing_order_rows: run.missing_order_rows || 0,
+                invoiced_groups: run.invoiced_groups || 0,
+                invoiced_usage_rows: run.invoiced_usage_rows || 0,
+                generated_invoice_ids: Array.isArray(run.generated_invoice_ids) ? run.generated_invoice_ids.join(', ') : '',
+                notes: run.notes || ''
+            };
+        });
+
+        var html = '';
+        html += renderSimpleTable(
+            '{{ 'Uninvoiced totals by month/order'|trans }}',
+            [
+                { key: 'period_month', label: '{{ 'Month'|trans }}' },
+                { key: 'client_id', label: '{{ 'Client ID'|trans }}' },
+                { key: 'order_id', label: '{{ 'Order ID'|trans }}' },
+                { key: 'row_count', label: '{{ 'Rows'|trans }}' },
+                { key: 'total_hours', label: '{{ 'Hours'|trans }}' },
+                { key: 'total_amount', label: '{{ 'Amount'|trans }}' }
+            ],
+            report.uninvoiced_totals || [],
+            '{{ 'No uninvoiced usage rows with order linkage.'|trans }}'
+        );
+
+        html += renderSimpleTable(
+            '{{ 'Rows missing order_id linkage'|trans }}',
+            [
+                { key: 'id', label: '{{ 'Usage ID'|trans }}' },
+                { key: 'client_id', label: '{{ 'Client ID'|trans }}' },
+                { key: 'vmid', label: '{{ 'VM ID'|trans }}' },
+                { key: 'period_hour', label: '{{ 'Hour'|trans }}' },
+                { key: 'state', label: '{{ 'State'|trans }}' },
+                { key: 'amount', label: '{{ 'Amount'|trans }}' },
+                { key: 'vm_order_id', label: '{{ 'VM order_id'|trans }}' }
+            ],
+            report.missing_order_rows || [],
+            '{{ 'No missing order_id rows.'|trans }}'
+        );
+
+        html += renderSimpleTable(
+            '{{ 'Recent generated invoices from VPS usage'|trans }}',
+            [
+                { key: 'invoice_id', label: '{{ 'Invoice ID'|trans }}' },
+                { key: 'client_id', label: '{{ 'Client ID'|trans }}' },
+                { key: 'invoice_status', label: '{{ 'Status'|trans }}' },
+                { key: 'usage_rows', label: '{{ 'Usage rows'|trans }}' },
+                { key: 'amount', label: '{{ 'Amount'|trans }}' },
+                { key: 'period_start', label: '{{ 'Period start'|trans }}' },
+                { key: 'period_end', label: '{{ 'Period end'|trans }}' },
+                { key: 'invoiced_at', label: '{{ 'Invoiced at'|trans }}' }
+            ],
+            report.recent_generated_invoices || [],
+            '{{ 'No VPS usage invoices generated yet.'|trans }}'
+        );
+
+        html += renderSimpleTable(
+            '{{ 'Recent billing runs'|trans }}',
+            [
+                { key: 'run_at', label: '{{ 'Run at'|trans }}' },
+                { key: 'metered_rows', label: '{{ 'Metered'|trans }}' },
+                { key: 'inserted_rows', label: '{{ 'Inserted'|trans }}' },
+                { key: 'updated_rows', label: '{{ 'Updated'|trans }}' },
+                { key: 'missing_order_rows', label: '{{ 'Missing order'|trans }}' },
+                { key: 'invoiced_groups', label: '{{ 'Invoiced groups'|trans }}' },
+                { key: 'invoiced_usage_rows', label: '{{ 'Invoiced rows'|trans }}' },
+                { key: 'generated_invoice_ids', label: '{{ 'Invoice IDs'|trans }}' },
+                { key: 'notes', label: '{{ 'Notes'|trans }}' }
+            ],
+            runRows,
+            '{{ 'No billing runs recorded yet.'|trans }}'
+        );
+
+        billingResult.classList.remove('d-none');
+        billingResult.innerHTML = html;
+    }
+
+    function loadBillingReport() {
+        billingButton.setAttribute('disabled', 'disabled');
+        billingButton.textContent = '{{ 'Loading...'|trans }}';
+        billingResult.classList.remove('d-none');
+        billingResult.className = 'alert alert-info';
+        billingResult.textContent = '{{ 'Loading VPS billing report...'|trans }}';
+
+        FOSSBilling.api.admin.post('vps/billing_report', { run_limit: 20 },
+            function(result) {
+                billingResult.className = '';
+                renderBillingReport(result || {});
+                billingButton.removeAttribute('disabled');
+                billingButton.textContent = '{{ 'Refresh report'|trans }}';
+            },
+            function(error) {
+                var msg = (error && error.message) ? error.message : '{{ 'Unable to load billing report'|trans }}';
+                billingResult.className = 'alert alert-danger';
+                billingResult.textContent = msg;
+                billingButton.removeAttribute('disabled');
+                billingButton.textContent = '{{ 'Refresh report'|trans }}';
+            }
+        );
+    }
+
+    function runBillingNow() {
+        runBillingButton.setAttribute('disabled', 'disabled');
+        runBillingButton.textContent = '{{ 'Running...'|trans }}';
+        billingRunResult.classList.remove('d-none');
+        billingRunResult.className = 'alert alert-info mb-3';
+        billingRunResult.textContent = '{{ 'Executing billing cycle now...'|trans }}';
+
+        FOSSBilling.api.admin.post('vps/run_billing_now', {},
+            function(result) {
+                var metering = result && result.metering ? result.metering : {};
+                var invoicing = result && result.invoicing ? result.invoicing : {};
+                var invoiceIds = Array.isArray(invoicing.generated_invoice_ids) ? invoicing.generated_invoice_ids.join(', ') : '';
+                billingRunResult.className = 'alert alert-success mb-3';
+                billingRunResult.innerHTML =
+                    '<strong>{{ 'Billing run completed.'|trans }}</strong><br>' +
+                    '{{ 'Metered'|trans }}: ' + escapeHtml(String(metering.metered_rows || 0)) + ', ' +
+                    '{{ 'Inserted'|trans }}: ' + escapeHtml(String(metering.inserted_rows || 0)) + ', ' +
+                    '{{ 'Updated'|trans }}: ' + escapeHtml(String(metering.updated_rows || 0)) + ', ' +
+                    '{{ 'Missing order rows'|trans }}: ' + escapeHtml(String(metering.missing_order_rows || 0)) + '<br>' +
+                    '{{ 'Invoiced groups'|trans }}: ' + escapeHtml(String(invoicing.invoiced_groups || 0)) + ', ' +
+                    '{{ 'Invoiced rows'|trans }}: ' + escapeHtml(String(invoicing.invoiced_usage_rows || 0)) + ', ' +
+                    '{{ 'Invoice IDs'|trans }}: ' + escapeHtml(invoiceIds || '-');
+
+                runBillingButton.removeAttribute('disabled');
+                runBillingButton.textContent = '{{ 'Run billing now'|trans }}';
+                loadBillingReport();
+            },
+            function(error) {
+                var msg = (error && error.message) ? error.message : '{{ 'Unable to execute billing cycle'|trans }}';
+                billingRunResult.className = 'alert alert-danger mb-3';
+                billingRunResult.textContent = msg;
+                runBillingButton.removeAttribute('disabled');
+                runBillingButton.textContent = '{{ 'Run billing now'|trans }}';
+            }
+        );
+    }
+
+    function loadPreview() {
+        FOSSBilling.api.admin.post('vps/auth_preview', {},
+            function(result) {
+                renderPreview(result);
+            },
+            function(error) {
+                previewResult.classList.remove('d-none');
+                previewResult.className = 'mt-3 alert alert-danger';
+                previewResult.textContent = (error && error.message) ? error.message : '{{ 'Unable to load auth preview'|trans }}';
+            }
+        );
+    }
+
+    previewButton.addEventListener('click', function() {
+        loadPreview();
+    });
+
+    settingsForm.addEventListener('submit', function(event) {
+        var tokenId = (settingsForm.querySelector('input[name="proxmox_root_token_id"]')?.value || '').trim();
+        var tokenSecret = (settingsForm.querySelector('input[name="proxmox_root_token_secret"]')?.value || '').trim();
+        var password = (settingsForm.querySelector('input[name="proxmox_root_password"]')?.value || '').trim();
+        var hasEffectiveTokenSecret = tokenSecret !== '' || hasStoredTokenSecret;
+        var hasEffectivePassword = password !== '' || hasStoredPassword;
+
+        if ((tokenId && !hasEffectiveTokenSecret) || (!tokenId && tokenSecret)) {
+            event.preventDefault();
+            FOSSBilling.message('{{ 'Root token configuration is incomplete: provide both token ID and token secret, or clear both.'|trans }}', 'error');
+            return;
+        }
+
+        if (!tokenId && !hasEffectiveTokenSecret && !hasEffectivePassword) {
+            event.preventDefault();
+            FOSSBilling.message('{{ 'Configure either token ID + token secret, or root password.'|trans }}', 'error');
+        }
+    });
+
+    verifyButton.addEventListener('click', function() {
+        verifyButton.setAttribute('disabled', 'disabled');
+        verifyButton.textContent = '{{ 'Verifying...'|trans }}';
+        verifyResult.classList.remove('d-none');
+        verifyResult.className = 'mt-3 alert alert-info';
+        verifyResult.innerHTML = '{{ 'Running Proxmox capability checks...'|trans }}';
+
+        FOSSBilling.api.admin.post('vps/verify_connection', {},
+            function(result) {
+                var checks = Array.isArray(result.checks) ? result.checks : [];
+                var listHtml = checks.map(function(check) {
+                    var icon = check.ok ? 'OK' : 'FAIL';
+                    return '<li><strong>[' + icon + ']</strong> ' + escapeHtml(check.label || check.id || 'check') + ': ' + escapeHtml(check.message || '') + '</li>';
+                }).join('');
+
+                verifyResult.className = result.ok ? 'mt-3 alert alert-success' : 'mt-3 alert alert-warning';
+                verifyResult.innerHTML = '<p class="mb-2"><strong>' + escapeHtml(result.message || '') + '</strong></p><ul class="mb-0">' + listHtml + '</ul>';
+            },
+            function(error) {
+                var msg = (error && error.message) ? error.message : '{{ 'Verification failed'|trans }}';
+                verifyResult.className = 'mt-3 alert alert-danger';
+                verifyResult.textContent = msg;
+            }
+        );
+    });
+
+    billingButton.addEventListener('click', function() {
+        loadBillingReport();
+    });
+
+    runBillingButton.addEventListener('click', function() {
+        runBillingNow();
+    });
+
+    loadPreview();
+    loadBillingReport();
+});
+</script>
+{% endblock %}

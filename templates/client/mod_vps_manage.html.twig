@@ -161,6 +161,10 @@
 											<label for="vm_cost" class="form-label">{{ 'VM Cost'|trans }}</label>
 											<input class="form-control" type="text" name="vm_cost" id="vm_cost" value="$7.00" disabled required/>
 										</div>
+										<div class="col-2">
+											<label for="vm_ip_cost" class="form-label">{{ 'IP Cost'|trans }}</label>
+											<input class="form-control" type="text" id="vm_ip_cost" value="$0.00" disabled />
+										</div>
 									</div>
 								</div>
 								<div class="modal-footer">
@@ -243,22 +247,26 @@ var vm_disk_size = '10';
 var vm_cpu = '2';
 var vm_mem = '2';
 var vm_disk_type = 'sata';
+var vm_storage_slow_hourly_rate = {{ storage_slow_hourly_rate|default('0.0002777778')|number_format(8, '.', '')|raw }};
+var vm_storage_fast_hourly_rate = {{ storage_fast_hourly_rate|default('0.0006944444')|number_format(8, '.', '')|raw }};
+var vm_cpu_hourly_rate = {{ cpu_hourly_rate|default('0.0018055556')|number_format(8, '.', '')|raw }};
+var vm_memory_hourly_rate = {{ memory_hourly_rate|default('0.0016666667')|number_format(8, '.', '')|raw }};
+var vm_ip_hourly_rate = {{ ip_hourly_rate|default(0)|number_format(8, '.', '')|raw }};
 
 function calculate(){
 	var vm_disk_type = $('#vm_disk_type').val();
-	var vm_disk_size = $('#vm_disk_size').val();
-	var vm_cpu = $('#vm_cpu').val();
-	var vm_mem = $('#vm_mem').val();
-	if (vm_disk_type == 'ssd') {
-		var vm_disk_cost = (vm_disk_size * 0.5);
-	} else if (vm_disk_type == 'sata') {
-		var vm_disk_cost = (vm_disk_size * 0.2);
-  }
-  var vm_cpu_cost = (vm_cpu * 1.3);
-	var vm_mem_cost = (vm_mem * 1.2);
-  var vm_cost = (vm_disk_cost + vm_cpu_cost + vm_mem_cost);
+	var vm_disk_size = Number($('#vm_disk_size').val());
+	var vm_cpu = Number($('#vm_cpu').val());
+	var vm_mem = Number($('#vm_mem').val());
+	var storageHourlyRate = vm_disk_type === 'ssd' ? vm_storage_fast_hourly_rate : vm_storage_slow_hourly_rate;
+	var vm_disk_cost = vm_disk_size * storageHourlyRate * 720;
+	var vm_cpu_cost = vm_cpu * vm_cpu_hourly_rate * 720;
+	var vm_mem_cost = vm_mem * vm_memory_hourly_rate * 720;
+	var vm_ip_cost = vm_ip_hourly_rate * 720;
+	var vm_cost = vm_disk_cost + vm_cpu_cost + vm_mem_cost + vm_ip_cost;
 	$('#vm_cost').val(formatCurrency(vm_cost));
-	$('.provision').prop('disabled',false) 
+	$('#vm_ip_cost').val(formatCurrency(vm_ip_cost));
+	$('.provision').prop('disabled',false);
 }
 
 $('#vm_disk_size').click(function(event){

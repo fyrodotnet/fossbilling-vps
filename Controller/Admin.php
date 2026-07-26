@@ -72,7 +72,10 @@ class Admin implements \FOSSBilling\InjectionAwareInterface
         $api = $this->di['api_admin'];
         $vms = $api->vps_list_vms();
 
-        return $app->render('mod_vps_index', ['vms' => $vms]);
+        return $app->render('vps_admin_index', [
+            'vms' => $vms,
+            'vps_domain' => $this->di['mod_service']('Vps')->getVpsDomain(),
+        ]);
     }
 
 }

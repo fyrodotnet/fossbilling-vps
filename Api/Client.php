@@ -524,7 +524,7 @@ class Client extends AbstractApi
 			$data['vmid'] = $vmid;
 			$data['vncticket'] = $vncProxyArray->ticket;
 			if ($websocket = $proxmox->get("/nodes/$vmNode/qemu/$vmid/vncwebsocket",$data)) {
-				setcookie("PVEAuthCookie",$tokenJson->ticket, 0, "/", '.domain.com' );
+				setcookie("PVEAuthCookie", $tokenJson->ticket, 0, "/", '.' . $this->getService()->getVpsDomain());
 				return $data;
 			} else {
 				return false;
