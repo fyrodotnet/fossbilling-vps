@@ -13,9 +13,9 @@
     </div>
 
     <div class="card-body">
-        <p>{{ 'Every extension can have settings page. Only requirement is to have mod_example_settings.html.twig page in html_admin folder'|trans }}</p>
+        <p>{{ 'Every extension can have settings page. Only requirement is to have mod_vps_settings.html.twig page in html_admin folder'|trans }}</p>
 
-        {% set params = admin.extension_config_get({ "ext": "mod_example" }) %}
+        {% set params = admin.extension_config_get({ "ext": "mod_vps" }) %}
 
         <form method="post" action="{{ 'api/admin/extension/config_save'|link }}" class="api-form" data-api-msg="{{ 'Configuration updated'|trans }}">
             <input type="hidden" name="CSRFToken" value="{{ CSRFToken }}"/>
@@ -33,7 +33,7 @@
             </div>
 
             <input type="submit" value="{{ 'Update'|trans }}" class="btn btn-primary">
-            <input type="hidden" name="ext" value="mod_example" />
+            <input type="hidden" name="ext" value="mod_vps" />
         </form>
     </div>
 </div>

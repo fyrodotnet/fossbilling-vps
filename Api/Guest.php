@@ -22,8 +22,6 @@
  * This module can be called from API or in template
  */
 
-// Change "Example" with your module's name
-
 namespace Box\Mod\Vps\Api;
 
 use FOSSBilling\Api\AbstractApi;

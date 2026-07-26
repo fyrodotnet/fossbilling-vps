@@ -29,12 +29,11 @@ The module works based on funds added to the account (via whatever your chosen F
 
 ## Installation in FOSSBilling
 
-1) There are several instances of "domain.com" throughout the code -- I recommend doing a quick `grep -Ri domain\.com *` on the directory and replacing those first
-2) Copy the files into place on your FOSSBilling 0.8.3 install under modules/Vps
-3) In `modules/Vps/Api`, run `composer install` to install the module dependencies into `Api/vendor/`
-4) Go to the FOSSBilling admin panel and enable the module
-5) Go to Extensions -> VPS and configure it with your Proxmox details and billing rates
-6) Once users begin provisioning VMs, the admin page will accummulate the totals
+1) Copy the files into place on your FOSSBilling 0.8.3 install under modules/Vps
+2) In `modules/Vps/Api`, run `composer install` to install the module dependencies into `Api/vendor/`
+3) Go to the FOSSBilling admin panel and enable the module
+4) Go to Extensions -> VPS and configure it with your Proxmox details and billing rates
+5) Once users begin provisioning VMs, the admin page will accummulate the totals
 
 ## Tech Specs
 
