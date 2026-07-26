@@ -5,13 +5,13 @@ This is a module for FOSSBilling that adds VPS hosting support with Proxmox.
 ## Features
 
 - User sidebar adds "VPS" and "Containers" pages, allowing users to provision VMs and containers from a configured Proxmox instance, based on cloud-init templates. It also shows the total cost of the machine usage to date, to gauge whether the account needs to re-up.
-- Admin section to populate credentials, can use any realm/secret/token, etc. Allows you to specify cost per virtual machine, with two tiers of storage (presumably "slow" and "fast"), CPU, and memory by the hour. The Admin page also provides a billing breakdown.
+- Admin section to populate credentials, can use any realm/secret/token, etc. Allows you to specify cost per virtual machine, with two tiers of storage (presumably "slow" and "fast"), CPU, memory by the hour, and also by IP address, with options for "Public", "Internal", and "IPv6-Only". The Admin page also provides a billing breakdown.
 - Keeps track of the number of hours that each machine is powered on, and bills the user monthly based on that.
 
 ## Requirements
 
 - Proxmox 9
-- Latest FOSSBilling 0.8.3
+- Latest FOSSBilling 0.8.5 (for version 0.8.3 see the v0.8.3 branch)
 - Composer
 
 ## Information
