@@ -25,20 +25,20 @@ require_once __DIR__ . '/Api/vendor/autoload.php';
 
 class Service
 {
-    public const DEFAULT_VPS_DOMAIN = 'domain.com';
-    public const DEFAULT_PROXMOX_HOST = 'node1.' . self::DEFAULT_VPS_DOMAIN;
-    public const DEFAULT_PROXMOX_NODE = 'node1';
+    public const DEFAULT_VPS_DOMAIN = 'rc7.net';
+    public const DEFAULT_PROXMOX_HOST = 'pm2.' . self::DEFAULT_VPS_DOMAIN;
+    public const DEFAULT_PROXMOX_NODE = 'pm2';
     public const DEFAULT_PROXMOX_ROOT_USER = 'root';
     public const DEFAULT_PROXMOX_AUTH_REALM = 'pam';
     public const DEFAULT_PROXMOX_CLIENT_REALM = 'pve';
     public const PROXMOX_CLIENT_TOKEN_ID = 'fossbilling';
     public const VM_ID_START = 1000;
-    public const STORAGE_SLOW = 'slow';
-    public const STORAGE_FAST = 'fast';
+    public const STORAGE_SLOW = 'nas2-vm-slow';
+    public const STORAGE_FAST = 'nas2-vm-fast';
     public const NETWORK_MODE_PUBLIC = 'public';
     public const NETWORK_MODE_INTERNAL = 'internal';
     public const NETWORK_MODE_IPV6_ONLY = 'ipv6_only';
-    private const TEMP_ROOT_PASSWORD = 'temp_root_password';
+    private const TEMP_ROOT_PASSWORD = 'rc7temppass';
     private const CLIENT_FOLDER_META_KEY = 'vps_vm_folders';
     private const ROOT_TOKEN_SECRET_META_KEY = 'proxmox_root_token_secret';
     private const ROOT_PASSWORD_META_KEY = 'proxmox_root_password';
